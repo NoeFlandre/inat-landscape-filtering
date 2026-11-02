@@ -18,6 +18,7 @@ from huggingface_hub.errors import HfHubHTTPError
 from inat_landscape.adapters.hub import REPO_ID, HfHub, Hub, OfflineHub
 from inat_landscape.adapters.images import fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
+from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import summarize
 from inat_landscape.domain.thresholds import parse_thresholds
 from inat_landscape.pipeline.embed import run_embed
@@ -29,7 +30,6 @@ from inat_landscape.pipeline.sample import run_sample
 from inat_landscape.pipeline.score import SCORE, run_score
 from inat_landscape.pipeline.status import run_status
 
-MODEL_ID = "google/siglip2-base-patch16-224"
 _ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, urllib.error.URLError, OSError)
 
 
@@ -131,7 +131,7 @@ def _add_score(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--thresholds",
         type=_thresholds,
-        default=(0.01, 0.05, 0.1, 0.3, 0.5),
+        default=(0.0005, 0.001, 0.002, 0.005, 0.01),
         help="thresholds to count in the report, comma-separated",
     )
     p.set_defaults(handler=_score)

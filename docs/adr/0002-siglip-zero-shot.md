@@ -20,3 +20,14 @@ SigLIP was trained with a sigmoid on each image–text pair. `sigmoid(scale × c
 - A change of prompts needs only the `score` step. It does not need new embeddings.
 - The scores are not calibrated. The thresholds come from the score distribution and from a visual check.
 - A linear probe on the stored embeddings can replace the zero-shot score later. It needs labels.
+
+## Pilot result (10 000 photos)
+
+- The scores are small. The median is less than 0.0001. The 99th percentile is 0.0012. The maximum is 0.0135.
+- The model output is correct. The Hugging Face example ("2 cats") gives 0.17 with the same code. SigLIP sigmoid scores are low for short generic prompts.
+- The order of the scores is useful. A visual check of samples gave:
+  - `>= 0.002` (63 photos): almost all are scene views.
+  - `0.001` to `0.002` (63 photos): most are scene views. Some are vegetation close-ups.
+  - `0.0005` to `0.001` (89 photos): about half are scene views.
+  - `< 0.0005`: most are close views of plants or ground.
+- The published thresholds are 0.0005, 0.001 and 0.002.

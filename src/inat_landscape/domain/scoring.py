@@ -3,6 +3,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
+MODEL_ID = "google/siglip2-base-patch16-224"
 LANDSCAPE_PROMPTS = (
     "a photo of a landscape",
     "a wide view of the natural scenery",

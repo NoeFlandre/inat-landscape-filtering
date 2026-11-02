@@ -14,7 +14,7 @@ uv run inat-landscape ingest --fraction 0.001
 uv run inat-landscape sample --n 10000
 uv run inat-landscape embed
 uv run inat-landscape score
-uv run inat-landscape publish --thresholds 0.05,0.1,0.2
+uv run inat-landscape publish --thresholds 0.0005,0.001,0.002
 ```
 
 ## Quality
