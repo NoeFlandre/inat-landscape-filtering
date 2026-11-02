@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import torch
+import torch._inductor.config as inductor_config
 from PIL import Image
 from transformers import AutoModel, AutoProcessor
 
@@ -44,9 +45,10 @@ def test_torch_preprocessing_matches_the_model_processor():
     assert cos.min() > 0.9999
 
 
-def test_compiled_encoder_gives_the_same_embeddings(encoder):
+def test_compiled_encoder_freezes_weights_and_gives_the_same_embeddings(encoder):
     images = _images()
     compiled = SiglipEncoder(TINY, batch_size=2, compile=True).encode_images(images)
+    assert inductor_config.freezing
     assert np.allclose(compiled, encoder.encode_images(images), atol=2e-2)
 
 
