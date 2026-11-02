@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,17 @@ import pyarrow.parquet as pq
 def write_table(table: pa.Table, path: Path) -> None:
     """Write a Parquet file atomically."""
     _atomic(path, lambda tmp: pq.write_table(table, tmp, compression="zstd"))
+
+
+def write_batches(tables: Iterable[pa.Table], schema: pa.Schema, path: Path) -> None:
+    """Write tables one after the other into one Parquet file, atomically, with low memory."""
+
+    def write(tmp: Path) -> None:
+        with pq.ParquetWriter(tmp, schema, compression="zstd") as writer:
+            for table in tables:
+                writer.write_table(table)
+
+    _atomic(path, write)
 
 
 def read_table(path: Path, columns: list[str] | None = None) -> pa.Table:

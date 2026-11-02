@@ -152,3 +152,16 @@ def test_contrast_score_configs(scored):
     assert report.subsets[0].config == "contrast_ge_0_00"
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "`score_contrast` ≥ 0.0, best 100 per cell" in card
+
+
+def test_configs_written_in_several_batches_are_complete(scored, monkeypatch):
+    workdir, hub, _, _ = scored
+    whole = _publish(workdir, hub, (0.0,))
+    path = workdir / HUB_DIR / f"data/{whole.subsets[0].config}/part-00000.parquet"
+    expected = pq.read_table(path)
+    monkeypatch.setattr("inat_landscape.pipeline.publish.IMAGE_ROWS", 1)
+    _publish(workdir, hub, (0.0,))
+    batched = pq.read_table(path)
+    assert batched.to_pylist() == expected.to_pylist()
+    features = json.loads(batched.schema.metadata[b"huggingface"])["info"]["features"]
+    assert features["image"] == {"_type": "Image"}

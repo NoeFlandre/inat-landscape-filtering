@@ -10,7 +10,13 @@ import pyarrow.compute as pc
 
 from inat_landscape.adapters import figures
 from inat_landscape.adapters.embedding_store import EmbeddingStore
-from inat_landscape.adapters.files import read_json, read_table, write_bytes, write_table
+from inat_landscape.adapters.files import (
+    read_json,
+    read_table,
+    write_batches,
+    write_bytes,
+    write_table,
+)
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
 from inat_landscape.adapters.hub import REPO_ID, Hub, OfflineHub
 from inat_landscape.adapters.images import fetch
@@ -29,6 +35,7 @@ from inat_landscape.pipeline.score import SCORE, SCORED
 IMAGE_SIZE = "medium"
 CACHE = Path("cache") / IMAGE_SIZE
 PART = "part-00000.parquet"
+IMAGE_ROWS = 1000  # rows of a threshold config written at a time
 
 
 @dataclass(frozen=True)
@@ -193,12 +200,12 @@ def _with_urls(table: pa.Table) -> pa.Table:
     return table.append_column("url_medium", pa.array([p[1] for p in pairs], pa.string()))
 
 
-def _medium_images(workdir: Path, table: pa.Table, fetcher: Fetcher) -> dict[int, bytes]:
-    """Return the medium image bytes of each photo, from the cache or downloaded."""
+def _medium_images(workdir: Path, table: pa.Table, fetcher: Fetcher) -> dict[int, Path]:
+    """Return the cache file of the medium image of each photo, downloading missing ones."""
     pairs = zip(table["photo_id"].to_pylist(), table["extension"].to_pylist(), strict=True)
     paths = {i: workdir / CACHE / f"{i}.{e}" for i, e in pairs}
     _download_missing(paths, fetcher)
-    return {i: p.read_bytes() for i, p in paths.items() if p.exists()}
+    return {i: p for i, p in paths.items() if p.exists()}
 
 
 def _download_missing(paths: dict[int, Path], fetcher: Fetcher) -> None:
@@ -211,13 +218,23 @@ def _download_missing(paths: dict[int, Path], fetcher: Fetcher) -> None:
 
 
 def _write_subset(
-    root: Path, subset: pa.Table, spec: PublishSpec, threshold: float, images: dict[int, bytes]
+    root: Path, subset: pa.Table, spec: PublishSpec, threshold: float, images: dict[int, Path]
 ) -> Subset:
-    rows = zip(subset["photo_id"].to_pylist(), subset["extension"].to_pylist(), strict=True)
-    pairs = [(images[i], f"{i}.{e}") for i, e in rows]
-    column = image_column([b for b, _ in pairs], [p for _, p in pairs])
+    """Write one config with its images, IMAGE_ROWS rows at a time (bounded memory)."""
     name = config_name(threshold, spec.score)
-    write_table(
-        with_hf_features(subset.append_column("image", column)), root / "data" / name / PART
+    schema = with_hf_features(_with_images(subset.slice(0, 0), images)).schema
+    parts = (
+        _with_images(subset.slice(start, IMAGE_ROWS), images).replace_schema_metadata(
+            schema.metadata
+        )
+        for start in range(0, subset.num_rows, IMAGE_ROWS)
     )
+    write_batches(parts, schema, root / "data" / name / PART)
     return Subset(name, threshold, subset.num_rows)
+
+
+def _with_images(rows: pa.Table, images: dict[int, Path]) -> pa.Table:
+    pairs = zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True)
+    names = [(i, f"{i}.{e}") for i, e in pairs]
+    column = image_column([images[i].read_bytes() for i, _ in names], [n for _, n in names])
+    return rows.append_column("image", column)
