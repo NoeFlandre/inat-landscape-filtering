@@ -77,7 +77,8 @@ def test_card_figures_and_upload(scored):
         "**4 iNaturalist photos of plants and unidentified observations (4 with a location)" in card
     )
     assert "| plantae | 2 | 2 |" in card
-    assert "This gave 4 candidate photos" in card
+    assert "This gave 4 photos." in card
+    assert "All 4 sample photos are scored." in card
     for name in ("hero", "map", "scores"):
         png = workdir / HUB_DIR / "assets" / f"{name}.png"
         assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

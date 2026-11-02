@@ -36,7 +36,7 @@ configs:
 
 **4 photos reach the lowest threshold (0.1 on `score_landscape`, at most 100 per H3 cell) and come with their 500 px image. All 10 come with a 768-dimension [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224) image embedding.**
 
-The photos come from the [iNaturalist Open Data](https://github.com/inaturalist/inaturalist-open-data) snapshot of 2026-10-27, observed from 2001-01-01 to 2026-10-01. Every row is one photo with its location, date, taxon, licence and scores. The goal is a set of ground-level photos that show land use and land cover, to pair with remote sensing. This is a pilot: the scores have no human validation yet.
+The photos come from the [iNaturalist Open Data](https://github.com/inaturalist/inaturalist-open-data) snapshot of 2026-10-27, observed from 2001-01-01 to 2026-10-01. Every row is one photo with its location, date, taxon, licence and scores. The goal is a set of ground-level photos that show land use and land cover, to pair with remote sensing. The run is in progress: 10 of the 1,234 sample photos are scored. The scores have no human validation yet.
 
 ![Photos per cell of 2° and photos at or above 0.1](assets/map.png)
 
@@ -67,7 +67,7 @@ WHERE a.score_landscape >= 0.001 AND a.license <> 'CC-BY-NC';
 | `score_ge_0_10` | 4 | `score_landscape` ≥ 0.1, best 100 per cell, with the 500 px image |
 | `score_ge_0_50` | 2 | `score_landscape` ≥ 0.5, best 100 per cell, with the 500 px image |
 | `score_ge_0_90` | 1 | `score_landscape` ≥ 0.9, best 100 per cell, with the 500 px image |
-| `embeddings` | 10 | `photo_id` and the SigLIP2 image embedding (768 float16 values) |
+| `embeddings` | 12 | `photo_id` and the SigLIP2 image embedding (768 float16 values) |
 
 ![Distribution of score_landscape, with the thresholds](assets/scores.png)
 
@@ -137,12 +137,12 @@ Each score is `sigmoid(scale * cosine + bias)` between the image embedding and a
 * `score_closeup` uses `c`, `d`.
 * `score_contrast` is the cosine between the image and the direction "mean landscape prompt minus mean specimen prompt", with the specimen prompts `e`, `f`. It is high for a view of the land and low for a close view of one organism or of its traces.
 
-The scores are not calibrated probabilities, and they are small: most photos score below 0.0001. Their order is what matters. In the pilot (November 2026), a visual check of random photos in each score band set the thresholds 0.0005, 0.001 and 0.002: at or above 0.002, almost all photos are scene views; between 0.0005 and 0.001, about half are close views of vegetation or ground.
+`score_landscape` is a SigLIP sigmoid. It is not a calibrated probability, and it is small: most photos score below 0.0001. `score_contrast` is a cosine. For both, the order is what matters. A visual check of random photos in each score band (November 2026) gave: at or above 0.002 on `score_landscape` or 0.08 on `score_contrast`, almost all photos are scene views, with a few flower close-ups; between 0.04 and 0.06 on `score_contrast`, about half are close views of vegetation. `score_contrast` drops close views of the ground that `score_landscape` keeps, and adds views of forests, trees and water that `score_landscape` misses.
 
 ## Methodology
 
 1. **Source.** The metadata dump [`inaturalist-open-data-20261027.tar.gz`](https://x/metadata/inaturalist-open-data-20261027.tar.gz) is read once as a stream (36.7 GB compressed); it is not stored.
-2. **Sample.** An observation is in the sample when the first 8 hex digits of its UUID are below `0.001 * 16^8`. UUID v4 values are random, so the sample is random and deterministic, and a larger fraction gives a superset. This gave 1,234 candidate photos. The dataset holds the first 10 in (observation UUID, photo position, photo id) order; a larger sample keeps them. Within each [H3](https://h3geo.org) cell (resolution 5, about 250 km²), only the first 1,000 photos in that order enter the sample, so dense areas do not dominate. Photos with no location are left out.
+2. **Sample.** An observation is in the sample when the first 8 hex digits of its UUID are below `0.001 * 16^8`. UUID v4 values are random, so the sample is random and deterministic. Photos are in (observation UUID, photo position, photo id) order. Within each [H3](https://h3geo.org) cell (resolution 5, about 250 km²), only the first 1,000 photos in that order are kept, so dense areas do not dominate; a larger cap keeps a superset. Photos with no location are left out. This gave 1,234 photos.
 3. **Taxa.** Only Plantae (taxon 47126 and its descendants) and observations with no taxon or the root taxon Life. Habitat and vegetation photos are frequent there.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data bucket.
 5. **Embeddings.** The `small` photo (240 px longest side) goes through [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224). Download and decode cost more than the model at scale; the model input is 224 px anyway.

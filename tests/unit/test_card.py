@@ -43,6 +43,7 @@ def _info():
         years=("2001-01-01", "2026-10-01"),
         embedding_dir="embeddings/siglip2-base-patch16-224/small",
         embedding_dim=768,
+        embedding_rows=12,
         no_location=2,
         score="score_landscape",
         cap_per_cell=100,
@@ -133,3 +134,11 @@ def test_no_missing_location_line_leaves_the_list_intact():
 
 def test_unknown_resolution_has_a_fallback_area():
     assert "(resolution 9, see H3)" in render_card(replace(_info(), h3_res=9))
+
+
+def test_progress_line():
+    assert "The run is in progress: 10 of the 1,234 sample photos are scored." in render_card(
+        _info()
+    )
+    done = replace(_info(), candidates=10)
+    assert "All 10 sample photos are scored." in render_card(done)

@@ -62,6 +62,7 @@ class CardInfo:
     years: tuple[str, str]
     embedding_dir: str
     embedding_dim: int
+    embedding_rows: int
     no_location: int
     score: str
     cap_per_cell: int
@@ -197,8 +198,8 @@ The photos come from the [iNaturalist Open Data]\
 (https://github.com/inaturalist/inaturalist-open-data) snapshot of \
 {snapshot_label(info.snapshot)}, observed from {info.years[0]} to {info.years[1]}. Every row is \
 one photo with its location, date, taxon, licence and scores. The goal is a set of \
-ground-level photos that show land use and land cover, to pair with remote sensing. This is \
-a pilot: the scores have no human validation yet.
+ground-level photos that show land use and land cover, to pair with remote sensing. \
+{_progress(info)} The scores have no human validation yet.
 
 ![Photos per cell of 2° and photos at or above {low.threshold}](assets/map.png)
 """
@@ -252,7 +253,7 @@ def _configs_table(info: CardInfo) -> str:
         for s in info.subsets
     ]
     rows.append(
-        f"| `embeddings` | {info.total:,} | `photo_id` and the SigLIP2 image embedding "
+        f"| `embeddings` | {info.embedding_rows:,} | `photo_id` and the SigLIP2 image embedding "
         f"({info.embedding_dim} float16 values) |"
     )
     return "| Config | Rows | Content |\n|---|---:|---|\n" + "\n".join(rows)
@@ -323,11 +324,13 @@ embedding, as SigLIP computes it. A prompt set uses the mean of its unit text em
 minus mean specimen prompt", with the specimen prompts {negative}. It is high for a view of \
 the land and low for a close view of one organism or of its traces.
 
-The scores are not calibrated probabilities, and they are small: most photos score below \
-0.0001. Their order is what matters. In the pilot (November 2026), a visual check of random \
-photos in each score band set the thresholds 0.0005, 0.001 and 0.002: at or above 0.002, \
-almost all photos are scene views; between 0.0005 and 0.001, about half are close views of \
-vegetation or ground.
+`score_landscape` is a SigLIP sigmoid. It is not a calibrated probability, and it is small: \
+most photos score below 0.0001. `score_contrast` is a cosine. For both, the order is what \
+matters. A visual check of random photos in each score band (November 2026) gave: at or above \
+0.002 on `score_landscape` or 0.08 on `score_contrast`, almost all photos are scene views, \
+with a few flower close-ups; between 0.04 and 0.06 on `score_contrast`, about half are close \
+views of vegetation. `score_contrast` drops close views of the ground that `score_landscape` \
+keeps, and adds views of forests, trees and water that `score_landscape` misses.
 """
 
 
@@ -338,12 +341,11 @@ def _method(info: CardInfo) -> str:
 is read once as a stream (36.7 GB compressed); it is not stored.
 2. **Sample.** An observation is in the sample when the first 8 hex digits of its UUID are \
 below `{info.fraction} * 16^8`. UUID v4 values are random, so the sample is random and \
-deterministic, and a larger fraction gives a superset. This gave {info.candidates:,} \
-candidate photos. The dataset holds the first {info.total:,} in (observation UUID, photo \
-position, photo id) order; a larger sample keeps them. Within each \
+deterministic. Photos are in (observation UUID, photo position, photo id) order. Within each \
 [H3](https://h3geo.org) cell (resolution {info.h3_res}, \
 {_CELL_AREAS.get(info.h3_res, "see H3")}), only the first {info.embed_cap:,} photos in that \
-order enter the sample, so dense areas do not dominate. Photos with no location are left out.
+order are kept, so dense areas do not dominate; a larger cap keeps a superset. Photos with no \
+location are left out. This gave {info.candidates:,} photos.
 3. **Taxa.** Only Plantae (taxon 47126 and its descendants) and observations with no taxon \
 or the root taxon Life. Habitat and vegetation photos are frequent there.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data \
@@ -368,6 +370,15 @@ the organism was, not the area in view.
 * **No validation.** The thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
 """
+
+
+def _progress(info: CardInfo) -> str:
+    if info.total < info.candidates:
+        return (
+            f"The run is in progress: {info.total:,} of the {info.candidates:,} sample "
+            "photos are scored."
+        )
+    return f"All {info.candidates:,} sample photos are scored."
 
 
 def _missing_locations(count: int) -> str:

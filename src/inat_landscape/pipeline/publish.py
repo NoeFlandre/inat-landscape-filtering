@@ -134,6 +134,7 @@ def _card_info(
         years=_years(table),
         embedding_dir=embedding_dir(model_id),
         embedding_dim=store.dim(),
+        embedding_rows=len(store.done_ids()),
         no_location=table["latitude"].null_count,
         score=spec.score,
         cap_per_cell=spec.cap_per_cell,
