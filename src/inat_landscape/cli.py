@@ -22,7 +22,7 @@ from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_sour
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
-from inat_landscape.pipeline.embed import plan_embed, run_embed
+from inat_landscape.pipeline.embed import EmbedOptions, plan_embed, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.ports import Encoder
@@ -173,6 +173,12 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("embed", help="embed sampled photos that have no embedding yet")
     _hub_options(p)
     p.add_argument("--chunk", type=int, default=1000, help="photos per shard (default: 1000)")
+    p.add_argument(
+        "--download-batch",
+        type=int,
+        default=512,
+        help="photos downloaded ahead of the model, per batch (default: 512; GPUs: 2048)",
+    )
     p.add_argument("--batch-size", type=int, default=32, help="model batch size (default: 32)")
     p.add_argument(
         "--worker",
@@ -266,8 +272,7 @@ def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
         deps.encoder(args.model, args.batch_size, args.compile),
         deps.hub(args.repo_id, args.offline),
         fetcher=fetcher,
-        chunk=args.chunk,
-        worker=args.worker,
+        options=EmbedOptions(args.chunk, args.worker, args.download_batch),
     )
     print(" ".join(f"{k}={v}" for k, v in vars(report).items()))
 

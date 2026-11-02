@@ -40,4 +40,4 @@ echo "worker $WORKER: ${todo:-?} photos left"
 # once when no photo is left. So the chain ends by itself.
 oarsub -a "$OAR_JOB_ID" -l "host=1/gpu=1,walltime=1:00:00" "$REPO_DIR/scripts/g5k/embed.oar $WORKER" \
     || echo "could not queue the next job: run scripts/g5k/submit.sh again" >&2
-run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64
+run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64 --download-batch 2048

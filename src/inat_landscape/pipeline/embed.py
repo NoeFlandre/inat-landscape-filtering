@@ -24,7 +24,6 @@ from inat_landscape.pipeline.sample import SAMPLE
 
 _LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
-DOWNLOAD_BATCH = 2048  # photos per download batch; a shard gathers batches up to `chunk`
 _DECODE_THREADS = 4
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
@@ -109,21 +108,32 @@ def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: tuple[int, int
     return len(_work(workdir, model_id, hub, worker).todo)
 
 
+@dataclass(frozen=True)
+class EmbedOptions:
+    """How one embed run splits and batches its work."""
+
+    chunk: int = 1000  # photos per shard
+    worker: tuple[int, int] = (0, 1)  # this worker and the worker count
+    download_batch: int = 512  # photos downloaded and decoded ahead of the model, per batch
+
+
 def run_embed(
     workdir: Path,
     encoder: Encoder,
     hub: Hub,
     *,
     fetcher: Fetcher = fetch,
-    chunk: int = 1000,
-    worker: tuple[int, int] = (0, 1),
+    options: EmbedOptions = EmbedOptions(),  # noqa: B008 - frozen dataclass, shared safely
 ) -> EmbedReport:
     """Embed every sampled photo of `worker` (index, count) with no embedding and no permanent
     failure. Parallel workers on other machines share the work through the hub shards."""
+    chunk, worker = options.chunk, options.worker
     work = _work(workdir, encoder.model_id, hub, worker)
     shard = _Shard(work.store, chunk)
     embedded = failed = 0
-    for part, ids, images, bad in _prefetched(work.todo, fetcher, min(chunk, DOWNLOAD_BATCH)):
+    for part, ids, images, bad in _prefetched(
+        work.todo, fetcher, min(chunk, options.download_batch)
+    ):
         if ids:
             shard.add(ids, np.asarray(encoder.encode_images(images)))
         embedded, failed = embedded + len(ids), failed + len(bad)

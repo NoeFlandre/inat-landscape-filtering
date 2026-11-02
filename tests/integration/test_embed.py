@@ -6,7 +6,14 @@ from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.hub import OfflineHub
 from inat_landscape.adapters.images import fetch
-from inat_landscape.pipeline.embed import FAILURES, HUB_DIR, embedding_dir, plan_embed, run_embed
+from inat_landscape.pipeline.embed import (
+    FAILURES,
+    HUB_DIR,
+    EmbedOptions,
+    embedding_dir,
+    plan_embed,
+    run_embed,
+)
 from inat_landscape.pipeline.errors import StageError
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
@@ -24,7 +31,10 @@ def setup(tmp_path, server, monkeypatch):
 
 
 def _embed(workdir, hub, encoder, **kw):
-    return run_embed(workdir, encoder, hub, fetcher=lambda u: fetch(u, backoff=0.0), chunk=2, **kw)
+    options = EmbedOptions(chunk=2, **kw)
+    return run_embed(
+        workdir, encoder, hub, fetcher=lambda u: fetch(u, backoff=0.0), options=options
+    )
 
 
 def test_embeds_all_sampled_photos_in_chunks(setup):
@@ -136,12 +146,12 @@ def test_plan_counts_the_work_left_without_the_model(setup):
     assert plan_embed(workdir, FakeEncoder.model_id, hub) == 1
 
 
-def test_shards_gather_several_download_batches(setup, monkeypatch):
+def test_shards_gather_several_download_batches(setup):
     workdir, handler, hub = setup
     serve_photos(handler)
-    monkeypatch.setattr("inat_landscape.pipeline.embed.DOWNLOAD_BATCH", 1)
+    options = EmbedOptions(chunk=3, download_batch=1)
     report = run_embed(
-        workdir, FakeEncoder(), hub, fetcher=lambda u: fetch(u, backoff=0.0), chunk=3
+        workdir, FakeEncoder(), hub, fetcher=lambda u: fetch(u, backoff=0.0), options=options
     )
     assert report.embedded == 4
     assert len(hub.uploads) == 2  # 3 photos, then 1
@@ -154,7 +164,7 @@ def test_a_download_error_stops_the_run(setup):
         raise RuntimeError("network down")
 
     with pytest.raises(RuntimeError, match="network down"):
-        run_embed(workdir, FakeEncoder(), hub, fetcher=broken, chunk=2)
+        run_embed(workdir, FakeEncoder(), hub, fetcher=broken, options=EmbedOptions(chunk=2))
 
 
 def test_parallel_workers_keep_separate_failure_files(setup):
