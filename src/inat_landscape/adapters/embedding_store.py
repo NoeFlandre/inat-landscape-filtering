@@ -72,14 +72,15 @@ class EmbeddingStore:
         return path
 
     def load(self) -> tuple[list[int], np.ndarray]:
-        """Return all ids and float32 embeddings. Each id appears once."""
+        """Return all ids and the float16 embeddings (as stored). Each id appears once."""
         tables = [read_table(s) for s in self._shards()]
         if not tables:
-            return [], np.zeros((0, 0), np.float32)
+            return [], np.zeros((0, 0), np.float16)
         table = pa.concat_tables(tables)
         ids = table["photo_id"].to_pylist()
         first = sorted({i: n for n, i in reversed(list(enumerate(ids)))}.values())
-        matrix = np.stack(table["embedding"].to_numpy(zero_copy_only=False)).astype(np.float32)
+        flat = table["embedding"].combine_chunks().flatten().to_numpy()
+        matrix = flat.reshape(table.num_rows, -1)
         return [ids[n] for n in first], matrix[first]
 
     def dim(self) -> int:

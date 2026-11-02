@@ -16,9 +16,9 @@ def write_table(table: pa.Table, path: Path) -> None:
     _atomic(path, lambda tmp: pq.write_table(table, tmp, compression="zstd"))
 
 
-def read_table(path: Path) -> pa.Table:
-    """Read a Parquet file."""
-    return pq.read_table(path)
+def read_table(path: Path, columns: list[str] | None = None) -> pa.Table:
+    """Read a Parquet file, or only some of its columns."""
+    return pq.read_table(path, columns=columns)
 
 
 def write_json(data: dict[str, Any], path: Path) -> None:

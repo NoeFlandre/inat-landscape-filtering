@@ -67,11 +67,11 @@ def open_store(workdir: Path, model_id: str, hub: Hub) -> EmbeddingStore:
     return store
 
 
-def read_sample(workdir: Path) -> pa.Table:
+def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
     """Return the sample table, or fail if the sample stage did not run."""
     if not (workdir / SAMPLE).exists():
         raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
-    return read_table(workdir / SAMPLE)
+    return read_table(workdir / SAMPLE, columns)
 
 
 @dataclass(frozen=True)
@@ -86,12 +86,12 @@ class _Work:
 
 def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _Work:
     """Return the photos of `worker` and which of them still need an embedding."""
-    sample = read_sample(workdir)
+    sample = read_sample(workdir, columns=["photo_id", "extension"])  # small, for parallel workers
     mine = [for_worker(i, *worker) for i in sample["photo_id"].to_pylist()]
     sample = sample.filter(pa.array(mine, pa.bool_()))
     store = open_store(workdir, model_id, hub)
     done = store.done_ids()
-    failures = _read_failures(workdir)
+    failures = _read_failures(workdir / failures_name(worker))
     permanent = _permanent(failures) - done
     rows = sample.select(["photo_id", "extension"]).to_pylist()
     return _Work(
@@ -127,7 +127,7 @@ def run_embed(
         if ids:
             shard.add(ids, np.asarray(encoder.encode_images(images)))
         embedded, failed = embedded + len(ids), failed + len(bad)
-        _record_failures(workdir, work.failures, part, bad)
+        _record_failures(workdir / failures_name(worker), work.failures, part, bad)
         _LOG.info("embedded %d/%d, failed %d", embedded, len(work.todo), failed)
     shard.flush()
     return EmbedReport(
@@ -234,17 +234,22 @@ def _failure(result: Fetched) -> dict:
     }
 
 
-def _read_failures(workdir: Path) -> dict[int, dict]:
-    path = workdir / FAILURES
+def failures_name(worker: tuple[int, int]) -> str:
+    """Return the failure file of a worker: one file each, as parallel workers share a folder."""
+    index, count = worker
+    return FAILURES if count == 1 else f"failures-{index}-of-{count}.parquet"
+
+
+def _read_failures(path: Path) -> dict[int, dict]:
     rows = read_table(path).to_pylist() if path.exists() else []
     return {r["photo_id"]: r for r in rows}
 
 
 def _record_failures(
-    workdir: Path, failures: dict[int, dict], tried: list[dict], failed: list[dict]
+    path: Path, failures: dict[int, dict], tried: list[dict], failed: list[dict]
 ) -> None:
     for row in tried:
         failures.pop(row["photo_id"], None)
     failures.update({f["photo_id"]: f for f in failed})
     rows = [failures[k] for k in sorted(failures)]
-    write_table(pa.Table.from_pylist(rows, schema=_FAILURE_SCHEMA), workdir / FAILURES)
+    write_table(pa.Table.from_pylist(rows, schema=_FAILURE_SCHEMA), path)

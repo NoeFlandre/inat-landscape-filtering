@@ -23,7 +23,7 @@ def test_add_writes_float16_shard_and_uploads(tmp_path, hub):
     assert hub.uploads == [f"{DIR}/{path.name}"]
     ids, emb = store.load()
     assert ids == [3, 1]
-    assert emb.dtype == np.float32
+    assert emb.dtype == np.float16
     assert emb.tolist() == [[1, 2], [3, 4]]
 
 

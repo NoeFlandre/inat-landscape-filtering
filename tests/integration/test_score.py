@@ -49,3 +49,16 @@ def test_score_needs_embeddings(tmp_path):
     (tmp_path / "remote").mkdir()
     with pytest.raises(StageError, match="embed"):
         run_score(tmp_path, FakeEncoder(), FakeHub(tmp_path / "remote"))
+
+
+def test_scores_do_not_depend_on_the_scoring_chunk(embedded, monkeypatch):
+    workdir, hub = embedded
+    whole = run_score(workdir, FakeEncoder(), hub)
+    monkeypatch.setattr("inat_landscape.pipeline.score.SCORE_ROWS", 1)
+    chunked = run_score(workdir, FakeEncoder(), hub)
+    assert whole.column_names == chunked.column_names
+    for name in whole.column_names:
+        if name.startswith("score_"):  # last-bit differences between BLAS paths
+            assert np.allclose(whole[name].to_numpy(), chunked[name].to_numpy(), atol=1e-12)
+        else:
+            assert whole[name].equals(chunked[name]), name

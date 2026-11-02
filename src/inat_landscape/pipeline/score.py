@@ -23,13 +23,19 @@ from inat_landscape.pipeline.ports import Encoder
 
 SCORED = "scored.parquet"
 SCORE = "score_landscape"
+SCORE_ROWS = 100_000  # embeddings scored at a time, to bound the memory
 
 
 def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
     """Write and return the sample photos that have an embedding, with their scores."""
     table, images = _embedded_sample(workdir, encoder.model_id, hub)
-    for name, values in _score_columns(images, encoder).items():
-        table = table.append_column(name, pa.array(values))
+    directions = _directions(encoder)
+    parts = [
+        _score_columns(images[i : i + SCORE_ROWS], directions, encoder)
+        for i in range(0, len(images), SCORE_ROWS)
+    ]
+    for name in parts[0]:
+        table = table.append_column(name, pa.array(np.concatenate([p[name] for p in parts])))
     write_table(table, workdir / SCORED)
     return table
 
@@ -45,14 +51,25 @@ def _embedded_sample(workdir: Path, model_id: str, hub: Hub) -> tuple[pa.Table, 
     return table, embeddings[[row[i] for i in table["photo_id"].to_pylist()]]
 
 
-def _score_columns(images: np.ndarray, encoder: Encoder) -> dict[str, np.ndarray]:
+def _directions(encoder: Encoder) -> dict[str, tuple[str, np.ndarray]]:
+    """Return each score column: its kind (sigmoid or cosine) and its text direction."""
     texts = encoder.encode_texts([*LANDSCAPE_PROMPTS, *CLOSEUP_PROMPTS, *NEGATIVE_PROMPTS])
     a, b = len(LANDSCAPE_PROMPTS), len(LANDSCAPE_PROMPTS) + len(CLOSEUP_PROMPTS)
     landscape, closeup, negative = texts[:a], texts[a:b], texts[b:]
+    directions = {
+        SCORE: ("sigmoid", ensemble(landscape)),
+        "score_closeup": ("sigmoid", ensemble(closeup)),
+        "score_contrast": ("cosine", contrast_direction(landscape, negative)),
+    }
+    return directions | {f"{SCORE}_{i}": ("sigmoid", t) for i, t in enumerate(landscape, start=1)}
 
-    def score(text_embedding: np.ndarray) -> np.ndarray:
-        return sigmoid_scores(images, text_embedding, encoder.scale, encoder.bias)
 
-    columns = {SCORE: score(ensemble(landscape)), "score_closeup": score(ensemble(closeup))}
-    columns["score_contrast"] = cosine_scores(images, contrast_direction(landscape, negative))
-    return columns | {f"{SCORE}_{i}": score(t) for i, t in enumerate(landscape, start=1)}
+def _score_columns(
+    images: np.ndarray, directions: dict[str, tuple[str, np.ndarray]], encoder: Encoder
+) -> dict[str, np.ndarray]:
+    return {
+        name: sigmoid_scores(images, text, encoder.scale, encoder.bias)
+        if kind == "sigmoid"
+        else cosine_scores(images, text)
+        for name, (kind, text) in directions.items()
+    }

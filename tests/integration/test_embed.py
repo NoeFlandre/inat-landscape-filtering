@@ -155,3 +155,14 @@ def test_a_download_error_stops_the_run(setup):
 
     with pytest.raises(RuntimeError, match="network down"):
         run_embed(workdir, FakeEncoder(), hub, fetcher=broken, chunk=2)
+
+
+def test_parallel_workers_keep_separate_failure_files(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler, skip=(101, 102))
+    _embed(workdir, hub, FakeEncoder(), worker=(0, 2))  # 102 fails
+    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))  # 101 fails
+    zero = read_table(workdir / "failures-0-of-2.parquet")["photo_id"].to_pylist()
+    one = read_table(workdir / "failures-1-of-2.parquet")["photo_id"].to_pylist()
+    assert (zero, one) == ([102], [101])
+    assert not (workdir / FAILURES).exists()
