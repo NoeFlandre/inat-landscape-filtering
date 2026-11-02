@@ -15,6 +15,17 @@ CLOSEUP_PROMPTS = (
     "a photo of a leaf",
 )
 
+NEGATIVE_PROMPTS = (
+    "a photo of a single plant",
+    "a photo of a single leaf",
+    "a photo of a single flower",
+    "a photo of a single animal",
+    "a natural specimen",
+    "animal tracks on the ground",
+    "animal droppings",
+    "animal bones or a skull",
+)
+
 Matrix = NDArray[np.floating]
 
 
@@ -39,3 +50,15 @@ def sigmoid_scores(
     cosine = normalize(image_embeddings) @ normalize(np.atleast_2d(text_embedding))[0]
     logits = scale * cosine + bias
     return 0.5 * (1.0 + np.tanh(0.5 * logits))  # stable sigmoid
+
+
+def contrast_direction(positive: Matrix, negative: Matrix) -> NDArray[np.float64]:
+    """Return the unit text direction: mean positive prompt minus mean negative prompt."""
+    mean_pos = normalize(positive).mean(axis=0)
+    mean_neg = normalize(negative).mean(axis=0)
+    return normalize((mean_pos - mean_neg)[np.newaxis, :])[0]
+
+
+def cosine_scores(image_embeddings: Matrix, direction: Matrix) -> NDArray[np.float64]:
+    """Return the cosine between each image and a text direction, in [-1, 1]."""
+    return normalize(image_embeddings) @ normalize(np.atleast_2d(direction))[0]

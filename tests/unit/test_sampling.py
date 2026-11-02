@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.sampling import Candidate, in_sample, sample_prefix, select
+from inat_landscape.domain.sampling import Candidate, in_sample, sample_prefix, select, uuid_key
 
 uuids = st.uuids(version=4).map(str)
 fractions = st.floats(min_value=1e-9, max_value=1.0, allow_nan=False)
@@ -83,3 +83,14 @@ def test_select_orders_by_observation_then_position_then_photo():
 def test_select_rejects_negative_n():
     with pytest.raises(ValueError, match="n must be >= 0"):
         select([], -1)
+
+
+def test_uuid_key_is_the_first_16_hex_digits():
+    assert uuid_key("0123abcd-ef45-4678-9abc-def012345678") == 0x0123ABCDEF454678
+    assert uuid_key("0123ABCD-EF45-4678-9ABC-DEF012345678") == 0x0123ABCDEF454678
+
+
+@given(uuids, uuids)
+def test_uuid_key_order_matches_uuid_text_order(a, b):
+    if a[:18] != b[:18]:
+        assert (uuid_key(a) < uuid_key(b)) == (a[:18] < b[:18])

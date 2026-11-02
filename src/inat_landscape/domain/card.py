@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 REPO_URL = "https://github.com/NoeFlandre/inat-landscape-filtering"
+_CELL_AREAS = {5: "about 250 km²", 6: "about 36 km²", 7: "about 5 km²"}
 _SIZE_CATEGORIES = (
     (1_000, "n<1K"),
     (10_000, "1K<n<10K"),
@@ -50,6 +51,7 @@ class CardInfo:
     model_id: str
     landscape_prompts: tuple[str, ...]
     closeup_prompts: tuple[str, ...]
+    negative_prompts: tuple[str, ...]
     fraction: float
     candidates: int
     total: int
@@ -61,6 +63,10 @@ class CardInfo:
     embedding_dir: str
     embedding_dim: int
     no_location: int
+    score: str
+    cap_per_cell: int
+    embed_cap: int
+    h3_res: int
 
 
 def fields(n_prompts: int) -> tuple[Field, ...]:
@@ -89,25 +95,27 @@ def fields(n_prompts: int) -> tuple[Field, ...]:
         Field(("score_landscape",), "float", "Main score, see [Scores](#scores)"),
         Field(per_prompt, "float", "Score of each landscape prompt, in order"),
         Field(("score_closeup",), "float", "Score of the close-up prompts"),
+        Field(("score_contrast",), "float", "Landscape minus specimen prompts: cosine in [-1, 1]"),
+        Field(("h3_cell",), "int", "[H3](https://h3geo.org) cell of the location"),
         Field(("sample_rank",), "int", "Position of the photo in the sample order"),
         Field(("image",), "image", "The 500 px photo (threshold configs only)"),
     )
 
 
-def breakdown(
-    categories: Sequence[str], scores: Sequence[float], thresholds: Sequence[float]
-) -> tuple[Breakdown, ...]:
-    """Count photos per category, in total and at or above each threshold, largest first."""
-    pairs = list(zip(categories, scores, strict=True))
+def breakdown(categories: Sequence[str], kept: Sequence[Sequence[bool]]) -> tuple[Breakdown, ...]:
+    """Count photos per category, in total and in each kept set, largest category first."""
+    if any(len(mask) != len(categories) for mask in kept):
+        raise ValueError("each kept mask must have one value per photo")
     names = sorted(set(categories), key=lambda n: (-categories.count(n), n))
     return tuple(
-        Breakdown(
-            n,
-            categories.count(n),
-            tuple(sum(c == n and s >= t for c, s in pairs) for t in thresholds),
-        )
+        Breakdown(n, categories.count(n), tuple(_count_kept(categories, m, n) for m in kept))
         for n in names
     )
+
+
+def _count_kept(categories: Sequence[str], mask: Sequence[bool], name: str) -> int:
+    # Lengths are checked in `breakdown`, so the `strict` mutants are equivalent.
+    return sum(k for c, k in zip(categories, mask, strict=True) if c == name)  # pragma: no mutate
 
 
 def size_category(n: int) -> str:
@@ -180,8 +188,9 @@ threshold keep their image](assets/hero.png)
 ({info.total - info.no_location:,} with a location), each with a zero-shot SigLIP2 score \
 that tells if the photo shows a landscape.**
 
-**{low.rows:,} photos reach the lowest threshold ({low.threshold}) and come with their \
-500 px image. All {info.total:,} come with a {info.embedding_dim}-dimension \
+**{low.rows:,} photos reach the lowest threshold ({low.threshold} on `{info.score}`, at most \
+{info.cap_per_cell} per H3 cell) and come with their 500 px image. All {info.total:,} come \
+with a {info.embedding_dim}-dimension \
 [`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**
 
 The photos come from the [iNaturalist Open Data]\
@@ -223,7 +232,7 @@ def _contents(info: CardInfo) -> str:
 
 {_configs_table(info)}
 
-![Distribution of score_landscape, log scale, with the thresholds](assets/scores.png)
+![Distribution of {info.score}, with the thresholds](assets/scores.png)
 
 Score quantiles, over all {info.total:,} photos:
 
@@ -238,7 +247,8 @@ Score quantiles, over all {info.total:,} photos:
 def _configs_table(info: CardInfo) -> str:
     rows = [f"| `all` (default) | {info.total:,} | Metadata and scores, no image |"]
     rows += [
-        f"| `{s.config}` | {s.rows:,} | `score_landscape` ≥ {s.threshold}, with the 500 px image |"
+        f"| `{s.config}` | {s.rows:,} | `{info.score}` ≥ {s.threshold}, best "
+        f"{info.cap_per_cell} per cell, with the 500 px image |"
         for s in info.subsets
     ]
     rows.append(
@@ -288,7 +298,7 @@ def _files(info: CardInfo) -> str:
 
 ```
 data/all/*.parquet                      all photos: metadata and scores
-data/score_ge_<t>/*.parquet             photos with score_landscape >= t, with the 500 px image
+data/<config>/*.parquet                 photos at or above a threshold, with the 500 px image
 {info.embedding_dir}/*.parquet   photo_id and SigLIP2 embedding
 assets/                                 figures of this card
 ```
@@ -300,6 +310,7 @@ Configs: `all` (default), {", ".join(f"`{s.config}`" for s in info.subsets)}, `e
 def _scores(info: CardInfo) -> str:
     landscape = "\n".join(f"   {i}. `{p}`" for i, p in enumerate(info.landscape_prompts, 1))
     closeup = ", ".join(f"`{p}`" for p in info.closeup_prompts)
+    negative = ", ".join(f"`{p}`" for p in info.negative_prompts)
     return f"""## Scores
 
 Each score is `sigmoid(scale * cosine + bias)` between the image embedding and a text \
@@ -308,6 +319,9 @@ embedding, as SigLIP computes it. A prompt set uses the mean of its unit text em
 * `score_landscape` uses these prompts; `score_landscape_<i>` is the score of prompt `i` alone:
 {landscape}
 * `score_closeup` uses {closeup}.
+* `score_contrast` is the cosine between the image and the direction "mean landscape prompt \
+minus mean specimen prompt", with the specimen prompts {negative}. It is high for a view of \
+the land and low for a close view of one organism or of its traces.
 
 The scores are not calibrated probabilities, and they are small: most photos score below \
 0.0001. Their order is what matters. In the pilot (November 2026), a visual check of random \
@@ -318,7 +332,6 @@ vegetation or ground.
 
 
 def _method(info: CardInfo) -> str:
-    low = info.subsets[0].threshold
     return f"""## Methodology
 
 1. **Source.** The metadata dump [`{_file_name(info.snapshot)}`]({info.snapshot}) \
@@ -327,7 +340,10 @@ is read once as a stream (36.7 GB compressed); it is not stored.
 below `{info.fraction} * 16^8`. UUID v4 values are random, so the sample is random and \
 deterministic, and a larger fraction gives a superset. This gave {info.candidates:,} \
 candidate photos. The dataset holds the first {info.total:,} in (observation UUID, photo \
-position, photo id) order; a larger sample keeps them.
+position, photo id) order; a larger sample keeps them. Within each \
+[H3](https://h3geo.org) cell (resolution {info.h3_res}, \
+{_CELL_AREAS.get(info.h3_res, "see H3")}), only the first {info.embed_cap:,} photos in that \
+order enter the sample, so dense areas do not dominate. Photos with no location are left out.
 3. **Taxa.** Only Plantae (taxon 47126 and its descendants) and observations with no taxon \
 or the root taxon Life. Habitat and vegetation photos are frequent there.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data \
@@ -336,8 +352,9 @@ bucket.
 [`{info.model_id}`](https://huggingface.co/{info.model_id}). Download and decode cost more \
 than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).
-7. **Thresholds.** {", ".join(str(s.threshold) for s in info.subsets)}, from a visual check \
-of each score band. Photos at or above {low} get their `medium` image (500 px).
+7. **Thresholds.** {", ".join(str(s.threshold) for s in info.subsets)} on `{info.score}`. \
+Each threshold config keeps at most {info.cap_per_cell} photos per cell, the best scored, with \
+their `medium` image (500 px).
 
 Code, with the decisions and their tradeoffs: [{REPO_URL.removeprefix("https://")}]\
 ({REPO_URL}).
@@ -346,13 +363,20 @@ Code, with the decisions and their tradeoffs: [{REPO_URL.removeprefix("https://"
 
 * **Obscured locations.** iNaturalist moves some locations (threatened taxa, user choice) \
 to a random point in a cell of about 0.2°. The source has no flag for this.
-* **Missing locations.** {info.no_location:,} photos have no coordinates. Filter on \
-`latitude IS NOT NULL`.
-* **What the location means.** It is where the observer or the organism was, not the area \
-in view.
+{_missing_locations(info.no_location)}* **What the location means.** It is where the observer or \
+the organism was, not the area in view.
 * **No validation.** The thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
 """
+
+
+def _missing_locations(count: int) -> str:
+    if count == 0:
+        return ""
+    return (
+        f"* **Missing locations.** {count:,} photos have no coordinates. Filter on "
+        "`latitude IS NOT NULL`.\n"
+    )
 
 
 def _license() -> str:

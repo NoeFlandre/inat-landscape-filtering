@@ -47,3 +47,10 @@ def test_parse_thresholds_rejects_bad_input(raw):
 
 def test_parse_thresholds_accepts_both_bounds():
     assert parse_thresholds("1,0") == (0.0, 1.0)
+
+
+def test_config_name_depends_on_the_score_column():
+    assert config_name(0.05, "score_contrast") == "contrast_ge_0_05"
+    assert config_name(0.05, "score_landscape") == "score_ge_0_05"
+    with pytest.raises(ValueError, match="score"):
+        config_name(0.05, "score_closeup")

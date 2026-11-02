@@ -2,13 +2,17 @@
 
 from collections.abc import Sequence
 
+_PREFIXES = {"score_landscape": "score_ge_", "score_contrast": "contrast_ge_"}
 
-def config_name(threshold: float) -> str:
-    """Return the config name for a threshold, for example `score_ge_0_30`."""
+
+def config_name(threshold: float, score: str = "score_landscape") -> str:
+    """Return the config name for a threshold on a score, for example `score_ge_0_30`."""
+    if score not in _PREFIXES:
+        raise ValueError(f"no config prefix for score {score!r}")
     text = f"{threshold:.2f}"
     if float(text) != threshold:
         text = repr(threshold)
-    return "score_ge_" + text.replace(".", "_")
+    return _PREFIXES[score] + text.replace(".", "_")
 
 
 def keep(scores: Sequence[float], threshold: float) -> list[bool]:

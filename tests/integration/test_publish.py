@@ -10,7 +10,7 @@ from inat_landscape.domain.card import fields
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
 from inat_landscape.pipeline.embed import HUB_DIR, run_embed
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.publish import run_publish
+from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.score import run_score
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
@@ -31,13 +31,10 @@ def scored(tmp_path, server, monkeypatch):
     return tmp_path / "w", hub, handler, scores
 
 
-def _publish(workdir, hub, thresholds):
+def _publish(workdir, hub, thresholds, score="score_landscape", cap=100):
+    spec = PublishSpec(tuple(thresholds), score=score, cap_per_cell=cap)
     return run_publish(
-        workdir,
-        thresholds,
-        hub,
-        model_id=FakeEncoder.model_id,
-        fetcher=lambda u: fetch(u, backoff=0.0),
+        workdir, spec, hub, model_id=FakeEncoder.model_id, fetcher=lambda u: fetch(u, backoff=0.0)
     )
 
 
@@ -127,4 +124,30 @@ def test_photo_without_medium_image_is_left_out_of_image_configs(scored):
 
 def test_publish_needs_scores(tmp_path):
     with pytest.raises(StageError, match="score"):
-        run_publish(tmp_path, (0.1,), FakeHub(tmp_path), model_id="m")
+        run_publish(tmp_path, PublishSpec((0.1,)), FakeHub(tmp_path), model_id="m")
+
+
+def test_cap_per_cell_keeps_the_best_scored_photos(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0,), cap=1)
+    path = workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet"
+    table = pq.read_table(path).to_pylist()
+    cells = [r["h3_cell"] for r in table]
+    assert len(cells) == len(set(cells)) == 3  # 4 photos in 3 cells
+    plant = max(
+        (
+            r
+            for r in pq.read_table(workdir / "scored.parquet").to_pylist()
+            if r["photo_id"] in (101, 102)
+        ),
+        key=lambda r: r["score_landscape"],
+    )
+    assert plant["photo_id"] in {r["photo_id"] for r in table}
+
+
+def test_contrast_score_configs(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0,), score="score_contrast")
+    assert report.subsets[0].config == "contrast_ge_0_00"
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    assert "`score_contrast` ≥ 0.0, best 100 per cell" in card

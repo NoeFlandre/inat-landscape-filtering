@@ -7,7 +7,7 @@ The dataset is [NoeFlandre/inat-landscape-filtering](https://huggingface.co/data
 ```
 README.md                                       dataset card
 data/all/*.parquet                              all scored photos: metadata and scores
-data/score_ge_<t>/*.parquet                     photos with score_landscape >= t, with the 500 px image
+data/<config>/*.parquet                         photos at or above a threshold, best 100 per H3 cell, with the 500 px image
 embeddings/siglip2-base-patch16-224/small/*.parquet   photo_id and float16 embedding
 ```
 
@@ -27,6 +27,8 @@ embeddings/siglip2-base-patch16-224/small/*.parquet   photo_id and float16 embed
 | `score_landscape` | main score: mean of the landscape prompts |
 | `score_landscape_1` to `score_landscape_3` | score of each landscape prompt |
 | `score_closeup` | score of the close-up prompts |
+| `score_contrast` | cosine with "landscape minus specimen" prompts, in [-1, 1] |
+| `h3_cell` | H3 cell of the location (resolution 5) |
 | `sample_rank` | position of the photo in the sample order |
 | `image` | the 500 px photo (threshold configs only) |
 

@@ -1,10 +1,10 @@
 """Publish stage: build the dataset configs and the card, and upload them."""
 
 import shutil
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -16,7 +16,8 @@ from inat_landscape.adapters.hub import REPO_ID, Hub, OfflineHub
 from inat_landscape.adapters.images import fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
-from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS
+from inat_landscape.domain.cells import top_per_cell
+from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS, NEGATIVE_PROMPTS
 from inat_landscape.domain.stats import key_quantiles
 from inat_landscape.domain.thresholds import config_name
 from inat_landscape.pipeline.embed import HUB_DIR, SCORING_SIZE, embedding_dir, photo_url
@@ -31,6 +32,15 @@ PART = "part-00000.parquet"
 
 
 @dataclass(frozen=True)
+class PublishSpec:
+    """Which score defines the configs, their thresholds, and the cap per H3 cell."""
+
+    thresholds: tuple[float, ...]
+    score: str = SCORE
+    cap_per_cell: int = 100
+
+
+@dataclass(frozen=True)
 class PublishReport:
     """What one publish run wrote."""
 
@@ -41,7 +51,7 @@ class PublishReport:
 
 def run_publish(
     workdir: Path,
-    thresholds: Sequence[float],
+    spec: PublishSpec,
     hub: Hub,
     *,
     model_id: str,
@@ -56,11 +66,24 @@ def run_publish(
     for folder in ("data", "assets"):
         shutil.rmtree(root / folder, ignore_errors=True)
     write_table(with_hf_features(table), root / "data" / "all" / PART)
-    kept = table.filter(pc.greater_equal(table[SCORE], min(thresholds)))
-    images = _medium_images(workdir, kept, fetcher)
-    subsets = tuple(_write_subset(root, table, t, images) for t in thresholds)
-    _figures(root / "assets", workdir, table, thresholds)
-    info = _card_info(workdir, table, subsets, model_id=model_id, repo_id=repo_id)
+    lowest = _kept_mask(table, spec, spec.thresholds[0])
+    images = _medium_images(workdir, table.filter(pa.array(lowest)), fetcher)
+    ids = pa.array(list(images), pa.int64())
+    has_image = pc.is_in(table["photo_id"], ids).to_numpy(zero_copy_only=False)
+    masks = [_kept_mask(table, spec, t) & has_image for t in spec.thresholds]
+    subsets = tuple(
+        _write_subset(root, table.filter(pa.array(m)), spec, t, images)
+        for m, t in zip(masks, spec.thresholds, strict=True)
+    )
+    _figures(root / "assets", workdir, table, spec, masks[0])
+    info = _card_info(
+        workdir,
+        table,
+        list(zip(subsets, masks, strict=True)),
+        spec,
+        model_id=model_id,
+        repo_id=repo_id,
+    )
     (root / "README.md").write_text(render_card(info))
     hub.upload_folder(
         root,
@@ -68,33 +91,54 @@ def run_publish(
         allow=["README.md", "data/**", "assets/**"],
         delete=["data/**", "assets/**"],
     )
-    return PublishReport(table.num_rows, subsets, kept.num_rows - len(images))
+    return PublishReport(table.num_rows, subsets, int((lowest & ~has_image).sum()))
+
+
+def _kept_mask(table: pa.Table, spec: PublishSpec, threshold: float) -> np.ndarray:
+    """Photos at or above the threshold, at most `cap_per_cell` per cell, best scored first."""
+    scores = table[spec.score].to_numpy()
+    above = np.flatnonzero(scores >= threshold)
+    cells = table["h3_cell"].to_numpy()[above]
+    mask = np.zeros(table.num_rows, dtype=bool)
+    mask[above[top_per_cell(cells, scores[above], spec.cap_per_cell)]] = True
+    return mask
 
 
 def _card_info(
-    workdir: Path, table: pa.Table, subsets: tuple[Subset, ...], *, model_id: str, repo_id: str
+    workdir: Path,
+    table: pa.Table,
+    published: list[tuple[Subset, np.ndarray]],
+    spec: PublishSpec,
+    *,
+    model_id: str,
+    repo_id: str,
 ) -> CardInfo:
-    manifest = read_json(workdir / MANIFEST) or {}
-    scores = table[SCORE].to_pylist()
-    thresholds = [s.threshold for s in subsets]
+    stored = read_json(workdir / MANIFEST) or {}
+    params = stored.get("params", {})
     store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), OfflineHub())
+    kept = [m.tolist() for _, m in published]
     return CardInfo(
         repo_id=repo_id,
-        snapshot=manifest.get("source", SNAPSHOT_URL),
+        snapshot=params.get("source", SNAPSHOT_URL),
         model_id=model_id,
         landscape_prompts=LANDSCAPE_PROMPTS,
         closeup_prompts=CLOSEUP_PROMPTS,
-        fraction=manifest.get("fraction", 0.0),
-        candidates=manifest.get("candidates", table.num_rows),
+        negative_prompts=NEGATIVE_PROMPTS,
+        fraction=params.get("fraction", 0.0),
+        candidates=stored.get("candidates", table.num_rows),
         total=table.num_rows,
-        subsets=subsets,
-        groups=breakdown(table["group"].to_pylist(), scores, thresholds),
-        licenses=breakdown(table["license"].to_pylist(), scores, thresholds),
-        quantiles=key_quantiles(scores),
+        subsets=tuple(s for s, _ in published),
+        groups=breakdown(table["group"].to_pylist(), kept),
+        licenses=breakdown(table["license"].to_pylist(), kept),
+        quantiles=key_quantiles(table[spec.score].to_pylist()),
         years=_years(table),
         embedding_dir=embedding_dir(model_id),
         embedding_dim=store.dim(),
         no_location=table["latitude"].null_count,
+        score=spec.score,
+        cap_per_cell=spec.cap_per_cell,
+        embed_cap=params.get("cap", 0),
+        h3_res=params.get("res", 0),
     )
 
 
@@ -104,22 +148,27 @@ def _years(table: pa.Table) -> tuple[str, str]:
     return str(pc.min(dates))[:4], str(pc.max(dates))[:4]
 
 
-def _figures(folder: Path, workdir: Path, table: pa.Table, thresholds: Sequence[float]) -> None:
+def _figures(
+    folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec, lowest: np.ndarray
+) -> None:
     pool = read_table(workdir / CANDIDATES).select(["longitude", "latitude"])
-    kept = table.filter(pc.greater_equal(table[SCORE], min(thresholds)))
+    kept = table.filter(pa.array(lowest))
 
     def xy(t: pa.Table) -> tuple[list[float], list[float]]:
         return t["longitude"].to_pylist(), t["latitude"].to_pylist()
 
     figures.pipeline(folder / "hero.png")
+    label = f"{spec.score} ≥ {spec.thresholds[0]}, best {spec.cap_per_cell} per cell"
     figures.world_map(
-        folder / "map.png",
-        xy(pool),
-        xy(table),
-        xy(kept),
-        f"score_landscape ≥ {min(thresholds)} ({kept.num_rows:,} photos)",
+        folder / "map.png", xy(pool), xy(table), xy(kept), f"{label} ({kept.num_rows:,} photos)"
     )
-    figures.score_histogram(folder / "scores.png", table[SCORE].to_pylist(), thresholds)
+    figures.score_histogram(
+        folder / "scores.png",
+        table[spec.score].to_pylist(),
+        spec.thresholds,
+        label=spec.score,
+        log=spec.score == SCORE,
+    )
 
 
 def _with_urls(table: pa.Table) -> pa.Table:
@@ -147,16 +196,12 @@ def _download_missing(paths: dict[int, Path], fetcher: Fetcher) -> None:
 
 
 def _write_subset(
-    root: Path, table: pa.Table, threshold: float, images: dict[int, bytes]
+    root: Path, subset: pa.Table, spec: PublishSpec, threshold: float, images: dict[int, bytes]
 ) -> Subset:
-    ids = pa.array(list(images), pa.int64())
-    subset = table.filter(
-        pc.and_(pc.greater_equal(table[SCORE], threshold), pc.is_in(table["photo_id"], ids))
-    )
     rows = zip(subset["photo_id"].to_pylist(), subset["extension"].to_pylist(), strict=True)
     pairs = [(images[i], f"{i}.{e}") for i, e in rows]
     column = image_column([b for b, _ in pairs], [p for _, p in pairs])
-    name = config_name(threshold)
+    name = config_name(threshold, spec.score)
     write_table(
         with_hf_features(subset.append_column("image", column)), root / "data" / name / PART
     )

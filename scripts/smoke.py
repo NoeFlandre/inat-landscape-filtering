@@ -23,7 +23,17 @@ with tempfile.TemporaryDirectory() as tmp:
     dump.write_bytes(make_dump())
     work = str(Path(tmp) / "work")
     assert (
-        run("--workdir", work, "ingest", "--source", str(dump), "--fraction", "0.25")
+        run(
+            "--workdir",
+            work,
+            "ingest",
+            "--source",
+            str(dump),
+            "--fraction",
+            "0.25",
+            "--cap",
+            "1000",
+        )
         == "candidates=4"
     )
     assert run("--workdir", work, "sample", "--n", "3") == "sample=3"

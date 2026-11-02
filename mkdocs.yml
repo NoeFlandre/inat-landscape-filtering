@@ -12,4 +12,6 @@ nav:
       - adr/0004-taxa-scope.md
       - adr/0005-storage-and-resume.md
       - adr/0006-licences.md
+      - adr/0007-density-cap.md
+      - adr/0008-negative-prompts.md
   - Technical debt: tech-debt.md

@@ -33,10 +33,15 @@ def in_sample(observation_uuid: str, prefix: str) -> bool:
     return observation_uuid[:_KEY_DIGITS].lower() < prefix
 
 
+def uuid_key(observation_uuid: str) -> int:
+    """Return the 64-bit sort key of an observation: the first 16 hex digits of its UUID."""
+    return int(observation_uuid.replace("-", "")[:16], 16)
+
+
 def select(candidates: list[Candidate], n: int) -> list[int]:
     """Return the photo ids of the first `n` candidates in sample order.
 
-    The order is (observation UUID, photo position, photo id). Because UUID v4 values are
+    The order is (observation key, photo position, photo id). Because UUID v4 values are
     random, the first `n` photos are a random sample, and a larger `n` gives a superset.
     """
     if n < 0:
@@ -44,6 +49,5 @@ def select(candidates: list[Candidate], n: int) -> list[int]:
     return [c.photo_id for c in sorted(candidates, key=_order)[:n]]
 
 
-def _order(c: Candidate) -> tuple[str, int, int]:
-    # lower() and upper() give the same order on hex digits: that mutant is equivalent.
-    return (c.observation_uuid.lower(), c.position, c.photo_id)  # pragma: no mutate
+def _order(c: Candidate) -> tuple[int, int, int]:
+    return (uuid_key(c.observation_uuid), c.position, c.photo_id)

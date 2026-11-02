@@ -8,10 +8,16 @@ Each item tells why it exists and how to remove it.
 - **Effect:** some rows have a location error of up to about 20 km.
 - **Cleanup:** get the `obscured` flag from the iNaturalist API or a GBIF export. Join it on `observation_uuid`.
 
-## Ingest cannot resume part-way
+## Ingest cannot resume inside a pass
 
-- **Why:** a gzip stream cannot seek. A stop during `ingest` loses the pass (about 25 minutes).
-- **Cleanup:** if the dump grows, split the read by tar member and save each filtered member.
+- **Why:** a gzip stream cannot seek. A stop during a pass loses that pass (about 20 to 30 minutes). Completed passes are kept.
+- **Cleanup:** save the filtered output of each tar member as soon as it is read.
+
+## The details pass and publish keep their tables in memory
+
+- **Why:** this is simple, and it is correct up to a few million photos.
+- **Effect:** with tens of millions of capped photos, the details join and the medium images in `publish` can exceed the memory.
+- **Cleanup:** write the details and the configs in parts, and stream the images.
 
 ## Embed runs download and model one after the other
 

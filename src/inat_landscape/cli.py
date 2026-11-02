@@ -19,13 +19,13 @@ from inat_landscape.adapters.hub import REPO_ID, HfHub, Hub, OfflineHub
 from inat_landscape.adapters.images import fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
 from inat_landscape.domain.scoring import MODEL_ID
-from inat_landscape.domain.stats import summarize
+from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
 from inat_landscape.pipeline.embed import run_embed
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ingest import run_ingest
+from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.ports import Encoder, Fetcher
-from inat_landscape.pipeline.publish import run_publish
+from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.sample import run_sample
 from inat_landscape.pipeline.score import SCORE, run_score
 from inat_landscape.pipeline.status import run_status
@@ -64,6 +64,13 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     return 0
 
 
+def _caps(raw: str) -> tuple[int, ...]:
+    try:
+        return tuple(sorted({int(part) for part in raw.split(",")}))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"bad cap list: {raw!r}") from None
+
+
 def _thresholds(raw: str) -> tuple[float, ...]:
     try:
         return parse_thresholds(raw)
@@ -81,6 +88,7 @@ def _parser() -> argparse.ArgumentParser:
         "--workdir", type=Path, default=Path("work"), help="local work directory (default: work)"
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    _add_measure(sub)
     _add_ingest(sub)
     _add_sample(sub)
     _add_embed(sub)
@@ -92,22 +100,45 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_ingest(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("ingest", help="stream the iNaturalist metadata dump and keep a sample")
+def _dump_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--source", default=SNAPSHOT_URL, help="dump URL or local path")
     p.add_argument(
         "--fraction",
         type=float,
-        default=0.001,
-        help="share of observations to keep, in (0, 1] (default: 0.001)",
+        default=1.0,
+        help="share of observations to keep, in (0, 1] (default: 1)",
+    )
+    p.add_argument("--res", type=int, default=5, help="H3 resolution of the cells (default: 5)")
+    p.add_argument(
+        "--cap",
+        type=int,
+        default=1000,
+        help="photos kept per cell before embedding (default: 1000)",
     )
     p.add_argument("--force", action="store_true", help="read the dump again even if done")
+
+
+def _add_ingest(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("ingest", help="stream the metadata dump and keep the capped candidates")
+    _dump_options(p)
     p.set_defaults(handler=_ingest)
+
+
+def _add_measure(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("measure", help="count eligible photos per H3 cell (metadata only)")
+    _dump_options(p)
+    p.add_argument(
+        "--caps",
+        type=_caps,
+        default=(100, 300, 1000),
+        help="caps to report, comma-separated (default: 100,300,1000)",
+    )
+    p.set_defaults(handler=_measure)
 
 
 def _add_sample(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("sample", help="select the first N candidate photos in sample order")
-    p.add_argument("--n", type=int, required=True, help="number of photos")
+    p.add_argument("--n", type=int, default=None, help="number of photos (default: all)")
     p.set_defaults(handler=_sample)
 
 
@@ -146,13 +177,32 @@ def _add_publish(sub: argparse._SubParsersAction) -> None:
         required=True,
         help="score thresholds, comma-separated, one config each",
     )
+    p.add_argument(
+        "--score",
+        choices=("score_landscape", "score_contrast"),
+        default="score_landscape",
+        help="score that defines the configs",
+    )
+    p.add_argument(
+        "--cap-per-cell",
+        type=int,
+        default=100,
+        help="best-scored photos kept per H3 cell in each config (default: 100)",
+    )
     p.set_defaults(handler=_publish)
 
 
+def _params(args: argparse.Namespace) -> IngestParams:
+    return IngestParams(source=args.source, fraction=args.fraction, res=args.res, cap=args.cap)
+
+
+def _measure(args: argparse.Namespace, deps: Deps) -> None:
+    index = run_index(args.workdir, _params(args), force=args.force, opener=deps.opener)
+    print(cap_report(index.counts["photos"].to_pylist(), args.caps))
+
+
 def _ingest(args: argparse.Namespace, deps: Deps) -> None:
-    table = run_ingest(
-        args.workdir, args.source, args.fraction, force=args.force, opener=deps.opener
-    )
+    table = run_ingest(args.workdir, _params(args), force=args.force, opener=deps.opener)
     print(f"candidates={table.num_rows}")
 
 
@@ -176,12 +226,15 @@ def _score(args: argparse.Namespace, deps: Deps) -> None:
         args.workdir, deps.encoder(args.model, 32), deps.hub(args.repo_id, args.offline)
     )
     print(summarize(table[SCORE].to_pylist(), args.thresholds))
+    quantiles = key_quantiles(table["score_contrast"].to_pylist())
+    print("score_contrast: " + " ".join(f"{name}={value:.4f}" for name, value in quantiles))
 
 
 def _publish(args: argparse.Namespace, deps: Deps) -> None:
+    spec = PublishSpec(args.thresholds, score=args.score, cap_per_cell=args.cap_per_cell)
     report = run_publish(
         args.workdir,
-        args.thresholds,
+        spec,
         deps.hub(args.repo_id, args.offline),
         model_id=args.model,
         fetcher=deps.fetcher,

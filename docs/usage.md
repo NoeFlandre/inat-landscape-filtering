@@ -12,14 +12,16 @@ To use Docker, build the image with `docker build -t inat-landscape .`.
 Run the commands in this order.
 
 ```bash
-uv run inat-landscape ingest --fraction 0.001
-uv run inat-landscape sample --n 10000
+uv run inat-landscape measure                       # photos per H3 cell, metadata only
+uv run inat-landscape ingest                        # full pool, 1,000 photos per cell at most
+uv run inat-landscape sample                        # all candidates (or --n N)
 uv run inat-landscape embed
 uv run inat-landscape score
-uv run inat-landscape publish --thresholds 0.0005,0.001,0.002
+uv run inat-landscape publish --thresholds 0.0005,0.001,0.002 --cap-per-cell 100
 ```
 
-- `ingest` downloads about 37 GB as a stream. It does not store the dump.
+- `measure` and `ingest` read the dump (about 37 GB) as a stream. They do not store it. Options: `--fraction` (default 1), `--res` (H3 resolution, default 5), `--cap` (photos per cell, default 1000).
+- `publish --score score_contrast` uses the negative-prompt score for the configs.
 - `embed` and `publish` write to the Hugging Face repository. Set `HF_TOKEN` to a token with write access.
 - To work without the Hugging Face repository, add `--offline` to `embed`, `score` and `publish`.
 
@@ -36,7 +38,7 @@ Use `uv run inat-landscape COMMAND --help` to see all options.
 
 ## Resume
 
-- `ingest` does not run again if the work directory has the same source and fraction. Use `--force` to run it again.
+- `ingest` reads the dump in three passes: taxa, per-cell index, details. Each pass keeps its output and does not run again with the same parameters. Use `--force` to run the index and the details again.
 - `embed` reads the embedding shards on the Hugging Face repository first. It does not embed a photo that has an embedding.
 - `embed` uploads local shards that are not on the Hugging Face repository. Thus shards from an `--offline` run go to the repository at the next online run.
 - `embed` records failed downloads in `failures.parquet`. It does not try a photo with a permanent failure (for example HTTP 404) again. It tries a photo with a temporary failure again.
@@ -46,8 +48,10 @@ Use `uv run inat-landscape COMMAND --help` to see all options.
 
 ```
 work/
-  ingest/candidates.parquet   candidate photos of the sample
-  ingest/manifest.json        source and fraction of the candidates
+  ingest/taxa.parquet         taxa table of the dump
+  ingest/cell_counts.parquet  eligible photos per H3 cell
+  ingest/selected.parquet     photos kept by the cap per cell
+  ingest/candidates.parquet   full metadata of the kept photos
   sample.parquet              the first N candidates
   failures.parquet            failed downloads
   scored.parquet              sample photos with scores

@@ -10,7 +10,7 @@ def histogram(scores: Sequence[float], bins: int) -> list[int]:
         raise ValueError(f"bins must be >= 1, got {bins}")
     counts = [0] * bins
     for s in scores:
-        counts[min(int(s * bins), bins - 1)] += 1
+        counts[min(max(int(s * bins), 0), bins - 1)] += 1
     return counts
 
 
@@ -40,3 +40,14 @@ def _bars(counts: list[int]) -> list[str]:
         f"[{i * width:.2f}, {(i + 1) * width:.2f}] {c:>7} " + "#" * min(c, 60)
         for i, c in enumerate(counts)
     ]
+
+
+def cap_report(counts: Sequence[int], caps: Sequence[int]) -> str:
+    """Return a text report of photos per cell, and of the photos kept under each cap."""
+    lines = [f"cells={len(counts)} photos={sum(counts)} max_per_cell={max(counts, default=0)}"]
+    lines += [
+        f"cap {cap}: {sum(min(c, cap) for c in counts)} photos, "
+        f"{sum(c >= cap for c in counts)} cells at the cap"
+        for cap in caps
+    ]
+    return "\n".join(lines)

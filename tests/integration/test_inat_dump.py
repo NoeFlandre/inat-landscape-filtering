@@ -4,23 +4,26 @@ import io
 
 import pytest
 
-from inat_landscape.adapters.inat_dump import DumpError, open_source, read_dump
-from inat_landscape.domain.sampling import sample_prefix
+from inat_landscape.adapters.inat_dump import DumpError, Selection, open_source, read_dump
+from inat_landscape.domain.sampling import uuid_key
 from tests import fakes
+
+SAMPLED = [fakes.OBS_PLANT, fakes.OBS_NO_ID, fakes.OBS_BIRD, fakes.OBS_LIFE]
+ALL = Selection.of([uuid_key(u) for u in SAMPLED], [101, 102, 103, 104, 105, 107])
 
 
 def _read(members=None):
-    return read_dump(io.BytesIO(fakes.make_dump(members)), sample_prefix(0.25))
+    return read_dump(io.BytesIO(fakes.make_dump(members)), ALL)
 
 
-def test_keeps_only_sampled_observations():
+def test_keeps_only_selected_observations():
     dump = _read()
     assert sorted(dump.observations["observation_uuid"].to_pylist()) == sorted(
         [fakes.OBS_PLANT, fakes.OBS_NO_ID, fakes.OBS_BIRD, fakes.OBS_LIFE]
     )
 
 
-def test_keeps_photos_of_sampled_observations_with_allowed_licence():
+def test_keeps_selected_photos_with_allowed_licence():
     assert sorted(_read().photos["photo_id"].to_pylist()) == [101, 102, 103, 105, 107]
 
 
@@ -70,7 +73,7 @@ def test_open_source_reads_local_path(tmp_path):
     path = tmp_path / "dump.tar.gz"
     path.write_bytes(fakes.make_dump())
     with open_source(str(path)) as stream:
-        assert read_dump(stream, sample_prefix(0.25)).photos.num_rows == 5
+        assert read_dump(stream, ALL).photos.num_rows == 5
 
 
 def test_open_source_uses_urlopen_for_https(monkeypatch):

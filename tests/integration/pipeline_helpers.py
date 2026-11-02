@@ -2,7 +2,7 @@
 
 import io
 
-from inat_landscape.pipeline.ingest import run_ingest
+from inat_landscape.pipeline.ingest import IngestParams, run_ingest
 from inat_landscape.pipeline.sample import run_sample
 from tests import fakes
 from tests.conftest import jpeg
@@ -11,7 +11,8 @@ COLORS = {101: (10, 200, 10), 102: (200, 10, 10), 103: (10, 10, 200), 107: (90, 
 
 
 def prepared(workdir, n=4):
-    run_ingest(workdir, "fake", 0.25, opener=lambda _s: io.BytesIO(fakes.make_dump()))
+    params = IngestParams(source="fake", fraction=0.25, res=5, cap=1000)
+    run_ingest(workdir, params, opener=lambda _s: io.BytesIO(fakes.make_dump()))
     return run_sample(workdir, n)
 
 

@@ -218,33 +218,48 @@ def _finite(points: Points) -> tuple[np.ndarray, np.ndarray]:
     return xy[0, keep], xy[1, keep]
 
 
-def score_histogram(path: Path, scores: Sequence[float], thresholds: Sequence[float]) -> None:
-    """Draw the distribution of scores on a log axis, with the thresholds."""
-    values = np.clip(np.asarray(scores, dtype=float), 1e-9, 1)
+def score_histogram(
+    path: Path, scores: Sequence[float], thresholds: Sequence[float], *, label: str, log: bool
+) -> None:
+    """Draw the distribution of scores, on a log axis when `log`, with the thresholds."""
+    values = np.asarray(scores, dtype=float)
+    if log:
+        values = np.clip(values, 1e-9, 1)
     fig, ax = plt.subplots(figsize=(14, 5.2))
-    bins = np.logspace(np.log10(values.min()), 0, 70) if values.min() < 1 else np.array([0.5, 1])
-    ax.hist(values, bins=bins.tolist(), color=BLUES[3], edgecolor=BG, linewidth=0.5)
-    ax.set_xscale("log")
-    ax.set_xlim(values.min() / 1.5, max(0.05, values.max() * 2))
+    ax.hist(values, bins=_bins(values, log), color=BLUES[3], edgecolor=BG, linewidth=0.5)
+    if log:
+        ax.set_xscale("log")
+    _threshold_lines(ax, values, thresholds)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.tick_params(colors=MUTED, labelsize=12, left=False)
+    ax.set_yticks([])
+    ax.set_xlabel(f"{label} ({'log' if log else 'linear'} scale)", fontsize=13, color=MUTED)
+    _save(fig, path)
+
+
+def _threshold_lines(ax: plt.Axes, values: np.ndarray, thresholds: Sequence[float]) -> None:
     top = ax.get_ylim()[1]
     for i, t in enumerate(thresholds):
         n = int((values >= t).sum())
         ax.axvline(t, color=KEPT, lw=1.6)
         ax.text(
-            t * 1.1,
+            t,
             top * (0.95 - 0.17 * i),
-            f"≥ {t}: {n:,} photos",
+            f" ≥ {t}: {n:,} photos",
             color=KEPT,
             fontsize=12,
             va="top",
             bbox={"fc": BG, "ec": "none", "pad": 2},
         )
-    for side in ("top", "right", "left"):
-        ax.spines[side].set_visible(False)
-    ax.tick_params(colors=MUTED, labelsize=12, left=False)
-    ax.set_yticks([])
-    ax.set_xlabel("score_landscape (log scale)", fontsize=13, color=MUTED)
-    _save(fig, path)
+
+
+def _bins(values: np.ndarray, log: bool) -> list[float]:
+    low, high = float(values.min()), float(values.max())
+    if high <= low:
+        return [low - 0.5, high + 0.5]
+    edges = np.logspace(np.log10(low), np.log10(high), 70) if log else np.linspace(low, high, 70)
+    return edges.tolist()
 
 
 def _save(fig: plt.Figure, path: Path) -> None:

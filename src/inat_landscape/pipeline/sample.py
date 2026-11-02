@@ -15,13 +15,13 @@ SAMPLE = "sample.parquet"
 __all__ = ["SAMPLE", "StageError", "run_sample"]
 
 
-def run_sample(workdir: Path, n: int) -> pa.Table:
-    """Write and return the sample of `n` photos."""
+def run_sample(workdir: Path, n: int | None) -> pa.Table:
+    """Write and return the first `n` candidates in sample order (all when n is None)."""
     path = workdir / CANDIDATES
     if not path.exists():
         raise StageError(f"no candidates at {path}: run `ingest` first")
     table = read_table(path)
-    chosen = select(_candidates(table), n)
+    chosen = select(_candidates(table), table.num_rows if n is None else n)
     order = {photo_id: rank for rank, photo_id in enumerate(chosen)}
     sample = table.filter(pc.is_in(table["photo_id"], pa.array(chosen, pa.int64())))
     ranks = pa.array([order[i] for i in sample["photo_id"].to_pylist()], pa.int64())

@@ -1,5 +1,6 @@
 """Dataset card: generated from one place, from the run results."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ def _info():
         model_id="google/siglip2-base-patch16-224",
         landscape_prompts=("a", "b"),
         closeup_prompts=("c", "d"),
+        negative_prompts=("e", "f"),
         fraction=0.001,
         candidates=1234,
         total=10,
@@ -42,6 +44,10 @@ def _info():
         embedding_dir="embeddings/siglip2-base-patch16-224/small",
         embedding_dim=768,
         no_location=2,
+        score="score_landscape",
+        cap_per_cell=100,
+        embed_cap=1000,
+        h3_res=5,
     )
 
 
@@ -78,7 +84,8 @@ def test_snapshot_label():
 
 
 def test_breakdown_counts_and_orders_largest_first():
-    result = breakdown(["b", "a", "b", "c"], [0.9, 0.1, 0.2, 0.5], [0.15, 0.5])
+    scores = [0.9, 0.1, 0.2, 0.5]
+    result = breakdown(["b", "a", "b", "c"], [[s >= t for s in scores] for t in (0.15, 0.5)])
     assert result == (
         Breakdown("b", 2, (2, 1)),
         Breakdown("a", 1, (0, 0)),
@@ -92,7 +99,7 @@ cats = st.lists(st.tuples(st.sampled_from("xyz"), st.floats(0, 1)), max_size=30)
 @given(cats, st.lists(st.floats(0, 1), max_size=3))
 def test_breakdown_invariants(rows, thresholds):
     names = [c for c, _ in rows]
-    result = breakdown(names, [s for _, s in rows], thresholds)
+    result = breakdown(names, [[s >= t for _, s in rows] for t in thresholds])
     assert sum(b.rows for b in result) == len(rows)
     for b in result:
         assert all(k <= b.rows for k in b.kept)
@@ -110,5 +117,19 @@ def test_fields_name_each_prompt_column():
 
 
 def test_breakdown_rejects_mismatched_lengths():
-    with pytest.raises(ValueError, match="zip"):
-        breakdown(["a", "b"], [0.1], [0.5])
+    with pytest.raises(ValueError, match=r"^each kept mask must have one value per photo$"):
+        breakdown(["a", "b"], [[True]])
+
+
+def test_missing_locations_line_only_when_some_are_missing():
+    assert "Missing locations" in render_card(_info())
+    assert "Missing locations" not in render_card(replace(_info(), no_location=0))
+
+
+def test_no_missing_location_line_leaves_the_list_intact():
+    card = render_card(replace(_info(), no_location=0))
+    assert "flag for this.\n* **What the location means.**" in card
+
+
+def test_unknown_resolution_has_a_fallback_area():
+    assert "(resolution 9, see H3)" in render_card(replace(_info(), h3_res=9))

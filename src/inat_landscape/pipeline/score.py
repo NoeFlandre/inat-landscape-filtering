@@ -11,6 +11,9 @@ from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.scoring import (
     CLOSEUP_PROMPTS,
     LANDSCAPE_PROMPTS,
+    NEGATIVE_PROMPTS,
+    contrast_direction,
+    cosine_scores,
     ensemble,
     sigmoid_scores,
 )
@@ -43,11 +46,13 @@ def _embedded_sample(workdir: Path, model_id: str, hub: Hub) -> tuple[pa.Table, 
 
 
 def _score_columns(images: np.ndarray, encoder: Encoder) -> dict[str, np.ndarray]:
-    texts = encoder.encode_texts([*LANDSCAPE_PROMPTS, *CLOSEUP_PROMPTS])
-    landscape, closeup = texts[: len(LANDSCAPE_PROMPTS)], texts[len(LANDSCAPE_PROMPTS) :]
+    texts = encoder.encode_texts([*LANDSCAPE_PROMPTS, *CLOSEUP_PROMPTS, *NEGATIVE_PROMPTS])
+    a, b = len(LANDSCAPE_PROMPTS), len(LANDSCAPE_PROMPTS) + len(CLOSEUP_PROMPTS)
+    landscape, closeup, negative = texts[:a], texts[a:b], texts[b:]
 
     def score(text_embedding: np.ndarray) -> np.ndarray:
         return sigmoid_scores(images, text_embedding, encoder.scale, encoder.bias)
 
     columns = {SCORE: score(ensemble(landscape)), "score_closeup": score(ensemble(closeup))}
+    columns["score_contrast"] = cosine_scores(images, contrast_direction(landscape, negative))
     return columns | {f"{SCORE}_{i}": score(t) for i, t in enumerate(landscape, start=1)}

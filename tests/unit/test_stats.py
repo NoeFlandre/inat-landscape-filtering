@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.stats import histogram, key_quantiles, summarize
+from inat_landscape.domain.stats import cap_report, histogram, key_quantiles, summarize
 
 scores = st.lists(st.floats(0, 1, allow_nan=False), min_size=1, max_size=200)
 
@@ -68,3 +68,22 @@ def test_summarize_uses_twenty_bins_by_default():
 def test_key_quantiles():
     scores = [i / 100 for i in range(101)]
     assert key_quantiles(scores) == (("Median", 0.5), ("p90", 0.9), ("p99", 0.99), ("Max", 1.0))
+
+
+def test_cap_report():
+    text = cap_report([5, 1, 3], caps=(2, 3, 10))
+    assert text.splitlines() == [
+        "cells=3 photos=9 max_per_cell=5",
+        "cap 2: 5 photos, 2 cells at the cap",
+        "cap 3: 7 photos, 2 cells at the cap",
+        "cap 10: 9 photos, 0 cells at the cap",
+    ]
+
+
+def test_cap_report_empty():
+    assert cap_report([], caps=(1,)).splitlines()[0] == "cells=0 photos=0 max_per_cell=0"
+
+
+def test_histogram_clamps_values_outside_zero_one():
+    # Regression: negative scores (score_contrast) landed in the wrong bin via negative indexes.
+    assert histogram([-0.3, -0.01, 1.5], 4) == [2, 0, 0, 1]

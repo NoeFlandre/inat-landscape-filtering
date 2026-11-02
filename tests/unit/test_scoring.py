@@ -9,6 +9,9 @@ from hypothesis.extra.numpy import arrays
 from inat_landscape.domain.scoring import (
     CLOSEUP_PROMPTS,
     LANDSCAPE_PROMPTS,
+    NEGATIVE_PROMPTS,
+    contrast_direction,
+    cosine_scores,
     ensemble,
     normalize,
     sigmoid_scores,
@@ -83,3 +86,28 @@ def test_score_does_not_overflow_for_large_logits():
     img = np.array([[1.0, 0.0], [-1.0, 0.0]], dtype=np.float32)
     s = sigmoid_scores(img, np.array([1.0, 0.0], dtype=np.float32), 1000.0, 0.0)
     assert s.tolist() == [1.0, 0.0]
+
+
+def test_negative_prompts_cover_specimens_and_animal_signs():
+    assert "a natural specimen" in NEGATIVE_PROMPTS
+    for word in ("plant", "leaf", "flower", "animal", "tracks", "droppings", "bones"):
+        assert any(word in p for p in NEGATIVE_PROMPTS), word
+
+
+def test_contrast_direction_is_unit_mean_positive_minus_mean_negative():
+    pos = np.array([[3.0, 4.0, 0.0], [6.0, 8.0, 0.0]])
+    neg = np.array([[0.0, 0.0, 1.0], [0.0, 3.0, 4.0]])
+    d = contrast_direction(pos, neg)
+    expected = np.array([0.6, 0.8, 0.0]) - np.array([0.0, 0.3, 0.9])
+    assert np.allclose(d, expected / np.linalg.norm(expected))
+
+
+def test_cosine_scores_rank_landscape_above_specimen():
+    d = contrast_direction(np.array([[1.0, 0.0]]), np.array([[0.0, 1.0]]))
+    s = cosine_scores(np.array([[5.0, 0.0], [0.0, 2.0], [1.0, 1.0]]), d)
+    assert s.tolist() == pytest.approx([2**-0.5, -(2**-0.5), 0.0])
+
+
+def test_contrast_direction_rejects_identical_sets():
+    with pytest.raises(ValueError, match="zero"):
+        contrast_direction(np.array([[1.0, 1.0]]), np.array([[2.0, 2.0]]))

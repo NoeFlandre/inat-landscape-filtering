@@ -38,17 +38,24 @@ def _run(deps, tmp_path, *args):
 
 
 def test_full_pilot_flow(deps, tmp_path, capsys):
+    assert _run(deps, tmp_path, "measure", "--fraction", "0.25", "--caps", "1,10") == 0
     assert _run(deps, tmp_path, "ingest", "--fraction", "0.25") == 0
-    assert _run(deps, tmp_path, "sample", "--n", "10") == 0
+    assert _run(deps, tmp_path, "sample") == 0
     assert _run(deps, tmp_path, "embed") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
-    assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99") == 0
+    assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
+    assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--score", "score_contrast") == 0
     assert _run(deps, tmp_path, "status", "--model", FakeEncoder.model_id) == 0
     out = capsys.readouterr().out
+    assert "cells=3 photos=4 max_per_cell=2" in out
+    assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
+    assert "sample=4" in out
+    assert "score_contrast: " in out
+    assert "score_ge_0_00=3" in out
+    assert "contrast_ge_0_00=" in out
     assert "embedded=4" in out
     assert "n=4" in out
-    assert "score_ge_0_00=4" in out
     status = json.loads(out.strip().splitlines()[-1])
     assert status == {"candidates": 4, "sample": 4, "embeddings": 4, "failures": 0, "scored": 4}
 
@@ -56,6 +63,12 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
 def test_stage_out_of_order_exits_1_with_message(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "sample", "--n", "3") == 1
     assert "run `ingest` first" in capsys.readouterr().err
+
+
+def test_unknown_score_exits_2(deps, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        _run(deps, tmp_path, "publish", "--thresholds", "0.1", "--score", "score_closeup")
+    assert exc.value.code == 2
 
 
 def test_bad_thresholds_exit_2(deps, tmp_path):
@@ -72,7 +85,7 @@ def test_help_lists_commands():
         check=False,
     )
     assert result.returncode == 0
-    for command in ("ingest", "sample", "embed", "score", "publish", "status"):
+    for command in ("measure", "ingest", "sample", "embed", "score", "publish", "status"):
         assert command in result.stdout
 
 
@@ -90,3 +103,9 @@ def test_default_deps_build_real_adapters_lazily():
     encoder = real.encoder("some/model", 8)
     assert isinstance(encoder, SiglipEncoder)
     assert (encoder.model_id, encoder.batch_size) == ("some/model", 8)
+
+
+def test_bad_caps_exit_2(deps, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        _run(deps, tmp_path, "measure", "--caps", "a,b")
+    assert exc.value.code == 2
