@@ -176,3 +176,12 @@ def test_parallel_workers_keep_separate_failure_files(setup):
     one = read_table(workdir / "failures-1-of-2.parquet")["photo_id"].to_pylist()
     assert (zero, one) == ([102], [101])
     assert not (workdir / FAILURES).exists()
+
+
+def test_max_photos_stops_the_run_early_with_its_work_saved(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    report = _embed(workdir, hub, FakeEncoder(), max_photos=2)
+    assert report.embedded == 2
+    assert plan_embed(workdir, FakeEncoder.model_id, hub) == 2
+    assert _embed(workdir, hub, FakeEncoder()).embedded == 2

@@ -115,6 +115,7 @@ class EmbedOptions:
     chunk: int = 1000  # photos per shard
     worker: tuple[int, int] = (0, 1)  # this worker and the worker count
     download_batch: int = 512  # photos downloaded and decoded ahead of the model, per batch
+    max_photos: int | None = None  # stop after this many photos (a supervisor restarts the run)
 
 
 def run_embed(
@@ -130,15 +131,14 @@ def run_embed(
     chunk, worker = options.chunk, options.worker
     work = _work(workdir, encoder.model_id, hub, worker)
     shard = _Shard(work.store, chunk)
+    todo = work.todo[: options.max_photos]
     embedded = failed = 0
-    for part, ids, images, bad in _prefetched(
-        work.todo, fetcher, min(chunk, options.download_batch)
-    ):
+    for part, ids, images, bad in _prefetched(todo, fetcher, min(chunk, options.download_batch)):
         if ids:
             shard.add(ids, np.asarray(encoder.encode_images(images)))
         embedded, failed = embedded + len(ids), failed + len(bad)
         _record_failures(workdir / failures_name(worker), work.failures, part, bad)
-        _LOG.info("embedded %d/%d, failed %d", embedded, len(work.todo), failed)
+        _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
     shard.flush()
     return EmbedReport(
         total=len(work.ids),

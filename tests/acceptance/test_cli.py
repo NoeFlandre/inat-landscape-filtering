@@ -45,7 +45,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
         _run(deps, tmp_path, "embed", "--worker", "1/2", "--concurrency", "4", "--no-compile") == 0
     )
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
-    assert _run(deps, tmp_path, "embed", "--worker", "0/2") == 0
+    assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--max-photos", "1000") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--score", "score_contrast") == 0
