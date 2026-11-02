@@ -75,7 +75,7 @@ def run_publish(
         _write_subset(root, table.filter(pa.array(m)), spec, t, images)
         for m, t in zip(masks, spec.thresholds, strict=True)
     )
-    _figures(root / "assets", workdir, table, spec, masks[0])
+    _figures(root / "assets", workdir, table, spec)
     info = _card_info(
         workdir,
         table,
@@ -114,7 +114,7 @@ def _card_info(
     repo_id: str,
 ) -> CardInfo:
     stored = read_json(workdir / MANIFEST) or {}
-    params = stored.get("params", {})
+    params = _params(workdir)
     store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), OfflineHub())
     kept = [m.tolist() for _, m in published]
     return CardInfo(
@@ -143,25 +143,39 @@ def _card_info(
     )
 
 
+def _params(workdir: Path) -> dict:
+    """Return the ingest parameters of the run (source, fraction, res, cap)."""
+    return (read_json(workdir / MANIFEST) or {}).get("params", {})
+
+
 def _years(table: pa.Table) -> tuple[str, str]:
     """Return the first and last observation years."""
     dates = pc.drop_null(table["observed_on"])
     return str(pc.min(dates))[:4], str(pc.max(dates))[:4]
 
 
-def _figures(
-    folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec, lowest: np.ndarray
-) -> None:
+def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) -> None:
     pool = read_table(workdir / CANDIDATES).select(["longitude", "latitude"])
-    kept = table.filter(pa.array(lowest))
+    params = _params(workdir)
+    per_cell = table.group_by("h3_cell").aggregate(
+        [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]
+    )
+    cells = (
+        per_cell["longitude_mean"].to_pylist(),
+        per_cell["latitude_mean"].to_pylist(),
+        per_cell["h3_cell_count"].to_pylist(),
+    )
 
     def xy(t: pa.Table) -> tuple[list[float], list[float]]:
         return t["longitude"].to_pylist(), t["latitude"].to_pylist()
 
     figures.pipeline(folder / "hero.png")
-    label = f"{spec.score} ≥ {spec.thresholds[0]}, best {spec.cap_per_cell} per cell"
     figures.world_map(
-        folder / "map.png", xy(pool), xy(table), xy(kept), f"{label} ({kept.num_rows:,} photos)"
+        folder / "map.png",
+        xy(pool),
+        cells,
+        cap=params.get("cap", spec.cap_per_cell),
+        res=params.get("res", 5),
     )
     figures.score_histogram(
         folder / "scores.png",

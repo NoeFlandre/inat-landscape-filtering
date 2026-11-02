@@ -12,8 +12,25 @@ def test_pipeline_figure(tmp_path):
 
 def test_world_map_skips_missing_coordinates(tmp_path):
     pool = ([0.0, 10.0, None], [0.0, 5.0, None])
-    figures.world_map(tmp_path / "map.png", pool, ([0.0], [0.0]), ([None], [None]), "kept")
+    cells = ([0.0, 20.0], [0.0, 10.0], [3, 10])
+    figures.world_map(tmp_path / "map.png", pool, cells, cap=10, res=5)
     assert (tmp_path / "map.png").read_bytes()[:8] == PNG
+
+
+def test_world_map_with_a_large_cap(tmp_path):
+    cells = ([0.0], [0.0], [700])
+    figures.world_map(tmp_path / "m.png", ([0.0], [0.0]), cells, cap=1000, res=5)
+    assert (tmp_path / "m.png").read_bytes()[:8] == PNG
+
+
+def test_cap_bounds():
+    assert figures._cap_bounds(3) == [1.0, 2.0, 3.0, 4.0]
+    big = figures._cap_bounds(1000)
+    assert big[0] == 1.0
+    assert big[-1] == 1001.0
+    assert len(big) <= 12
+    assert figures._bin_label(1.0, 2.0) == "1"
+    assert figures._bin_label(10.0, 32.0) == "10-31"
 
 
 def test_score_histogram_handles_zero_and_one(tmp_path):

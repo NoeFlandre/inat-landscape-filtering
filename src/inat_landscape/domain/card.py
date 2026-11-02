@@ -201,7 +201,8 @@ one photo with its location, date, taxon, licence and scores. The goal is a set 
 ground-level photos that show land use and land cover, to pair with remote sensing. \
 {_progress(info)} The scores have no human validation yet.
 
-![Photos per cell of 2° and photos at or above {low.threshold}](assets/map.png)
+![How full the H3 cells are against the cap of {info.embed_cap} photos, with the full sample \
+in grey](assets/map.png)
 """
 
 

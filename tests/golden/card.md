@@ -38,7 +38,7 @@ configs:
 
 The photos come from the [iNaturalist Open Data](https://github.com/inaturalist/inaturalist-open-data) snapshot of 2026-10-27, observed from 2001-01-01 to 2026-10-01. Every row is one photo with its location, date, taxon, licence and scores. The goal is a set of ground-level photos that show land use and land cover, to pair with remote sensing. The run is in progress: 10 of the 1,234 sample photos are scored. The scores have no human validation yet.
 
-![Photos per cell of 2° and photos at or above 0.1](assets/map.png)
+![How full the H3 cells are against the cap of 1000 photos, with the full sample in grey](assets/map.png)
 
 ## Quick start
 

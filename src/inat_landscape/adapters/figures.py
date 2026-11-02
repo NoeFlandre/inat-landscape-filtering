@@ -1,6 +1,7 @@
 """PNG figures for the dataset card (matplotlib, no display needed)."""
 
 from collections.abc import Sequence
+from itertools import pairwise
 from pathlib import Path
 
 import matplotlib as mpl
@@ -8,7 +9,7 @@ import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.patches import FancyBboxPatch, Rectangle
 
 BG = "#fbfbf9"
@@ -131,6 +132,8 @@ def _dataset(ax: plt.Axes) -> None:
 
 
 Points = tuple[Sequence[float | None], Sequence[float | None]]  # longitudes, latitudes
+CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
+_MAX_LINEAR_BINS = 12
 Box = tuple[float, float, float, float]  # x, y, width, height
 
 
@@ -165,44 +168,63 @@ def _chip(ax: plt.Axes, box: Box, label: str, tone: str) -> None:
     )
 
 
-def world_map(
-    path: Path,
-    pool: Points,
-    sample: Points,
-    kept: Points,
-    kept_label: str,
-) -> None:
-    """Draw photos per 2° cell over the candidate pool, with kept photos as points."""
+def world_map(path: Path, pool: Points, cells: CellCounts, *, cap: int, res: int) -> None:
+    """Draw how full the H3 cells are against the cap (mean per 2° hexagon), over the full
+    sample in grey."""
     fig, ax = plt.subplots(figsize=(16, 8.6))
-    _hexbin(ax, pool, ListedColormap(["#e6e6e3"]), None)
-    bounds = [1, 2, 5, 10, 20, 50, 100, 1000]
-    cells = _hexbin(ax, sample, ListedColormap(BLUES), BoundaryNorm(bounds, len(BLUES)))
-    ax.scatter(
-        *_finite(kept),
-        s=9,
-        color=KEPT,
-        edgecolors="white",
-        linewidths=0.4,
-        zorder=3,
-        label=kept_label,
-    )
+    _hexbin(ax, pool, ListedColormap(["#e6e6e3"]))
+    bounds = _cap_bounds(cap)
+    colors = LinearSegmentedColormap.from_list("blues", BLUES)(np.linspace(0, 1, len(bounds) - 1))
+    norm = BoundaryNorm(bounds, len(bounds) - 1)
+    lon, lat, count = cells
+    filled = _hexbin(ax, (lon, lat), ListedColormap(colors), norm, values=count)
     ax.set(xlim=(-180, 180), ylim=(-60, 84), aspect="equal")
     ax.axis("off")
-    ax.legend(loc="lower left", frameon=False, fontsize=12, markerscale=2.2)
     bar = fig.colorbar(
-        cells, ax=ax, orientation="horizontal", fraction=0.04, pad=0.02, aspect=45, ticks=bounds
+        filled,
+        ax=ax,
+        orientation="horizontal",
+        fraction=0.04,
+        pad=0.02,
+        aspect=45,
+        ticks=[(lo + hi) / 2 for lo, hi in pairwise(bounds)],
     )
+    bar.ax.set_xticklabels([_bin_label(lo, hi) for lo, hi in pairwise(bounds)])
     bar.outline.set_visible(False)
     bar.ax.tick_params(length=0, labelsize=12, colors=MUTED)
-    bar.set_label("Sampled photos per cell of 2° (grey: candidate pool)", fontsize=13, color=MUTED)
+    bar.set_label(
+        f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon "
+        "(grey: the full sample)",
+        fontsize=13,
+        color=MUTED,
+    )
     _save(fig, path)
 
 
-def _hexbin(ax: plt.Axes, points: Points, cmap: ListedColormap, norm: BoundaryNorm | None):
-    x, y = _finite(points)
+def _cap_bounds(cap: int) -> list[float]:
+    """Bin edges from 1 to the cap: one bin per value for small caps, log bins otherwise."""
+    if cap <= _MAX_LINEAR_BINS:
+        return [float(v) for v in range(1, cap + 2)]
+    return sorted({float(round(v)) for v in np.geomspace(1, cap + 1, _MAX_LINEAR_BINS)})
+
+
+def _bin_label(lo: float, hi: float) -> str:
+    return f"{lo:.0f}" if hi - lo <= 1 else f"{lo:.0f}-{hi - 1:.0f}"
+
+
+def _hexbin(
+    ax: plt.Axes,
+    points: Points,
+    cmap: ListedColormap,
+    norm: BoundaryNorm | None = None,
+    values: Sequence[float] | None = None,
+):
+    x, y = _finite(points) if values is None else (np.asarray(points[0]), np.asarray(points[1]))
     return ax.hexbin(
         x,
         y,
+        C=None if values is None else np.asarray(values, dtype=float),
+        reduce_C_function=np.mean,
         gridsize=(180, 72),
         extent=(-180, 180, -60, 84),
         linewidths=0,
