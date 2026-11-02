@@ -38,6 +38,7 @@ Use `uv run inat-landscape COMMAND --help` to see all options.
 
 - `ingest` does not run again if the work directory has the same source and fraction. Use `--force` to run it again.
 - `embed` reads the embedding shards on the Hugging Face repository first. It does not embed a photo that has an embedding.
+- `embed` uploads local shards that are not on the Hugging Face repository. Thus shards from an `--offline` run go to the repository at the next online run.
 - `embed` records failed downloads in `failures.parquet`. It does not try a photo with a permanent failure (for example HTTP 404) again. It tries a photo with a temporary failure again.
 - `publish` keeps the downloaded 500 px photos in `cache/medium`.
 

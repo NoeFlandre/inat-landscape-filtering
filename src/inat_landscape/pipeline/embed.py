@@ -52,9 +52,10 @@ def photo_url(photo_id: int, size: str, extension: str) -> str:
 
 
 def open_store(workdir: Path, model_id: str, hub: Hub) -> EmbeddingStore:
-    """Return the embedding store of `model_id`, synced with the hub."""
+    """Return the embedding store of `model_id`, synced both ways with the hub."""
     store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), hub)
     store.pull()
+    store.push()
     return store
 
 

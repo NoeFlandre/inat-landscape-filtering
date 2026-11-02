@@ -30,14 +30,23 @@ class EmbeddingStore:
 
     def pull(self) -> int:
         """Download remote shards that are not local yet. Return how many."""
-        missing = [
-            p
-            for p in self.hub.list_files(self.remote_dir + "/")
-            if p.endswith(".parquet") and not (self.root / p).exists()
-        ]
+        remote = set(self._remote_shards())
+        missing = sorted(p for p in remote if not (self.root / p).exists())
         for path in missing:
             self.hub.download(path, self.root)
         return len(missing)
+
+    def push(self) -> int:
+        """Upload local shards that are not on the hub yet. Return how many."""
+        remote = set(self._remote_shards())
+        local = [str(p.relative_to(self.root)) for p in self._shards()]
+        missing = [p for p in local if p not in remote]
+        for path in missing:
+            self.hub.upload_file(self.root / path, path, "Add embeddings made offline")
+        return len(missing)
+
+    def _remote_shards(self) -> list[str]:
+        return [p for p in self.hub.list_files(self.remote_dir + "/") if p.endswith(".parquet")]
 
     def done_ids(self) -> set[int]:
         """Return the ids of all photos that have an embedding."""

@@ -9,7 +9,7 @@ The pipeline must not calculate an embedding two times. The work machine can sto
 ## Decision
 
 - The embedding shards on the Hugging Face dataset are the only record of done work.
-- `embed` downloads the remote shards first. Then it embeds only the photos with no embedding.
+- `embed` downloads the remote shards and uploads the local-only shards first. Then it embeds only the photos with no embedding.
 - `embed` writes one shard for each chunk of 1000 photos. It uploads the shard at once.
 - The name of a shard is a hash of its photo ids. A shard name does not change between runs.
 - All local writes are atomic (a temporary file, then a rename).

@@ -60,3 +60,13 @@ def test_load_empty_store(tmp_path):
 def test_add_rejects_length_mismatch(tmp_path):
     with pytest.raises(ValueError, match="length"):
         EmbeddingStore(tmp_path, DIR, OfflineHub()).add([1], np.ones((2, 2)))
+
+
+def test_push_uploads_only_local_shards_missing_on_remote(tmp_path, hub):
+    store = EmbeddingStore(tmp_path / "a", DIR, OfflineHub())
+    store.add([1], np.ones((1, 2)))
+    store.add([2], np.ones((1, 2)))
+    online = EmbeddingStore(tmp_path / "a", DIR, hub)
+    assert online.push() == 2
+    assert online.push() == 0
+    assert len(hub.uploads) == 2

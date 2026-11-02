@@ -102,3 +102,14 @@ def test_chunk_where_every_photo_fails_writes_no_shard(setup):
     report = _embed(workdir, hub, FakeEncoder())
     assert (report.embedded, report.failed) == (0, 4)
     assert hub.uploads == []
+
+
+def test_online_run_uploads_shards_made_offline(setup):
+    # Regression: shards written with --offline were never uploaded by a later online run.
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    _embed(workdir, OfflineHub(), FakeEncoder())
+    encoder = FakeEncoder()
+    report = _embed(workdir, hub, encoder)
+    assert (report.already, report.embedded, encoder.image_calls) == (4, 0, 0)
+    assert len(hub.uploads) == 2
