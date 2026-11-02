@@ -82,5 +82,10 @@ class EmbeddingStore:
         matrix = np.stack(table["embedding"].to_numpy(zero_copy_only=False)).astype(np.float32)
         return [ids[n] for n in first], matrix[first]
 
+    def dim(self) -> int:
+        """Return the embedding length, or 0 when the store is empty."""
+        shards = self._shards()
+        return pq.read_schema(shards[0]).field("embedding").type.list_size if shards else 0
+
     def _shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))

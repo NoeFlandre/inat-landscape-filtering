@@ -14,6 +14,7 @@ dependencies = [
     "torch>=2.6",
     "transformers>=4.50",
     "numpy>=2.5.4",
+    "matplotlib>=3.11.2",
 ]
 
 [project.scripts]

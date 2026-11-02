@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.stats import histogram, summarize
+from inat_landscape.domain.stats import histogram, key_quantiles, summarize
 
 scores = st.lists(st.floats(0, 1, allow_nan=False), min_size=1, max_size=200)
 
@@ -63,3 +63,8 @@ def test_summarize_one_score():
 
 def test_summarize_uses_twenty_bins_by_default():
     assert len(summarize([0.5, 0.6], thresholds=()).splitlines()) == 2 + 20
+
+
+def test_key_quantiles():
+    scores = [i / 100 for i in range(101)]
+    assert key_quantiles(scores) == (("Median", 0.5), ("p90", 0.9), ("p99", 0.99), ("Max", 1.0))

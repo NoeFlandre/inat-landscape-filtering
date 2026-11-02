@@ -6,6 +6,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from inat_landscape.adapters.images import fetch
+from inat_landscape.domain.card import fields
+from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
 from inat_landscape.pipeline.embed import HUB_DIR, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.publish import run_publish
@@ -69,15 +71,33 @@ def test_threshold_configs_are_nested_and_carry_images(scored):
     assert features["latitude"] == {"dtype": "float64", "_type": "Value"}
 
 
-def test_card_and_upload(scored):
+def test_card_figures_and_upload(scored):
     workdir, hub, _, _ = scored
     _publish(workdir, hub, (0.0,))
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "config_name: score_ge_0_00" in card
+    assert (
+        "**4 iNaturalist photos of plants and unidentified observations (4 with a location)" in card
+    )
+    assert "| plantae | 2 | 2 |" in card
+    assert "This gave 4 candidate photos" in card
+    for name in ("hero", "map", "scores"):
+        png = workdir / HUB_DIR / "assets" / f"{name}.png"
+        assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        assert f"](assets/{name}.png)" in card
     [(allow, delete)] = hub.folder_uploads
-    assert allow == ["README.md", "data/**"]
-    assert delete == ["data/**"]
-    assert "README.md" in hub.list_files("")
+    assert allow == ["README.md", "data/**", "assets/**"]
+    assert delete == ["data/**", "assets/**"]
+    assert {"README.md", "assets/map.png"} <= set(hub.list_files(""))
+
+
+def test_card_documents_exactly_the_published_columns(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0,))
+    path = workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet"
+    columns = set(pq.read_schema(path).names)
+    documented = {n for f in fields(len(LANDSCAPE_PROMPTS)) for n in f.names}
+    assert columns == documented
 
 
 def test_stale_threshold_configs_are_removed(scored):

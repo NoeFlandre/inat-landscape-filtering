@@ -70,3 +70,10 @@ def test_push_uploads_only_local_shards_missing_on_remote(tmp_path, hub):
     assert online.push() == 2
     assert online.push() == 0
     assert len(hub.uploads) == 2
+
+
+def test_dim_is_the_embedding_length(tmp_path):
+    store = EmbeddingStore(tmp_path, DIR, OfflineHub())
+    assert store.dim() == 0
+    store.add([1], np.ones((1, 5)))
+    assert store.dim() == 5

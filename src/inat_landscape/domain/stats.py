@@ -23,6 +23,12 @@ def summarize(scores: Sequence[float], thresholds: Sequence[float], bins: int = 
     return "\n".join(lines + _bars(histogram(scores, bins)))
 
 
+def key_quantiles(scores: Sequence[float]) -> tuple[tuple[str, float], ...]:
+    """Return the median, p90, p99 and maximum of the scores."""
+    qs = quantiles(scores, n=100, method="inclusive")
+    return (("Median", qs[49]), ("p90", qs[89]), ("p99", qs[98]), ("Max", max(scores)))
+
+
 def _quantiles(scores: Sequence[float]) -> str:
     qs = quantiles(scores, n=100, method="inclusive")
     return "quantiles: " + " ".join(f"p{p}={qs[p - 1]:.4f}" for p in (50, 90, 95, 99))

@@ -32,3 +32,9 @@ Each item tells why it exists and how to remove it.
 
 - **Why:** the real model is 375 MB. CI uses a tiny random SigLIP model.
 - **Cleanup:** none needed. The smoke run on real data checks the real model.
+
+## The card states the pilot's visual check as fixed text
+
+- **Why:** the visual check of each score band is a human judgement, not a value the code can compute.
+- **Effect:** a run with other thresholds shows a sentence about the pilot thresholds.
+- **Cleanup:** pass the review notes to `publish` as a file, or label a test set and compute precision per threshold.

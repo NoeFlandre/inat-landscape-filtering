@@ -1,47 +1,114 @@
-"""Dataset card: generated from one place, lists configs and licences."""
+"""Dataset card: generated from one place, from the run results."""
 
 from pathlib import Path
 
-from inat_landscape.domain.card import CardInfo, Subset, render_card
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from inat_landscape.domain.card import (
+    Breakdown,
+    CardInfo,
+    Subset,
+    breakdown,
+    fields,
+    render_card,
+    size_category,
+    snapshot_label,
+)
+
+GOLDEN = Path(__file__).parent.parent / "golden" / "card.md"
 
 
 def _info():
     return CardInfo(
-        snapshot="https://x/inaturalist-open-data-20261027.tar.gz",
+        repo_id="u/r",
+        snapshot="https://x/metadata/inaturalist-open-data-20261027.tar.gz",
         model_id="google/siglip2-base-patch16-224",
         landscape_prompts=("a", "b"),
         closeup_prompts=("c", "d"),
+        fraction=0.001,
+        candidates=1234,
         total=10,
-        subsets=(Subset("score_ge_0_10", 0.1, 4), Subset("score_ge_0_50", 0.5, 1)),
-        licenses={"CC-BY": 6, "CC0": 4},
+        subsets=(
+            Subset("score_ge_0_10", 0.1, 4),
+            Subset("score_ge_0_50", 0.5, 2),
+            Subset("score_ge_0_90", 0.9, 1),
+        ),
+        groups=(Breakdown("plantae", 9, (4, 2, 1)), Breakdown("unidentified", 1, (0, 0, 0))),
+        licenses=(Breakdown("CC-BY", 6, (3, 1, 1)), Breakdown("CC0", 4, (1, 1, 0))),
+        quantiles=(("p50", 0.00001), ("max", 0.0135)),
+        years=("2001-01-01", "2026-10-01"),
         embedding_dir="embeddings/siglip2-base-patch16-224/small",
+        embedding_dim=768,
+        no_location=2,
     )
 
 
-def test_card_has_yaml_configs_for_each_subset_and_embeddings():
-    card = render_card(_info())
-    assert card.startswith("---\n")
-    assert "- config_name: all\n  data_files: data/all/*.parquet\n  default: true" in card
-    assert "- config_name: score_ge_0_10\n  data_files: data/score_ge_0_10/*.parquet" in card
-    emb = "embeddings/siglip2-base-patch16-224/small/*.parquet"
-    assert f"- config_name: embeddings\n  data_files: {emb}" in card
-
-
-def test_card_lists_counts_prompts_and_licences():
-    card = render_card(_info())
-    assert "| `score_ge_0_50` | 0.5 | 1 |" in card
-    assert "| CC-BY | 6 |" in card
-    assert '"a"' in card
-    assert "20261027" in card
-    assert "license: other" in card
-
-
-def test_card_yaml_block_is_well_formed_and_followed_by_body():
-    card = render_card(_info())
-    assert "\nconfigs:\n- config_name: all\n" in card
-    assert "\n---\n\n# iNaturalist landscape filtering\n" in card
-
-
 def test_card_matches_golden_file():
-    golden = Path(__file__).parent.parent / "golden" / "card.md"
-    assert render_card(_info()) == golden.read_text()
+    assert render_card(_info()) == GOLDEN.read_text()
+
+
+def test_card_yaml_lists_every_config_with_a_train_split():
+    card = render_card(_info())
+    assert card.startswith("---\nlicense: [cc0-1.0, cc-by-4.0, cc-by-nc-4.0]\n")
+    for name in ("all", "score_ge_0_10", "score_ge_0_50", "score_ge_0_90", "embeddings"):
+        assert f"- config_name: {name}\n  data_files:\n  - split: train\n" in card
+
+
+@pytest.mark.parametrize(
+    ("n", "label"),
+    [
+        (0, "n<1K"),
+        (999, "n<1K"),
+        (1000, "1K<n<10K"),
+        (10_000, "10K<n<100K"),
+        (5_000_000, "1M<n<10M"),
+        (10_000_000, "n>10M"),
+    ],
+)
+def test_size_category(n, label):
+    assert size_category(n) == label
+
+
+def test_snapshot_label():
+    assert snapshot_label("https://x/inaturalist-open-data-20261027.tar.gz") == "2026-10-27"
+    assert snapshot_label("https://x/latest.tar.gz") == "`latest.tar.gz`"
+    assert snapshot_label("dump") == "`dump`"
+
+
+def test_breakdown_counts_and_orders_largest_first():
+    result = breakdown(["b", "a", "b", "c"], [0.9, 0.1, 0.2, 0.5], [0.15, 0.5])
+    assert result == (
+        Breakdown("b", 2, (2, 1)),
+        Breakdown("a", 1, (0, 0)),
+        Breakdown("c", 1, (1, 1)),
+    )
+
+
+cats = st.lists(st.tuples(st.sampled_from("xyz"), st.floats(0, 1)), max_size=30)
+
+
+@given(cats, st.lists(st.floats(0, 1), max_size=3))
+def test_breakdown_invariants(rows, thresholds):
+    names = [c for c, _ in rows]
+    result = breakdown(names, [s for _, s in rows], thresholds)
+    assert sum(b.rows for b in result) == len(rows)
+    for b in result:
+        assert all(k <= b.rows for k in b.kept)
+        assert len(b.kept) == len(thresholds)
+
+
+def test_fields_name_each_prompt_column():
+    names = [n for f in fields(3) for n in f.names]
+    assert [n for n in names if n.startswith("score_landscape_")] == [
+        "score_landscape_1",
+        "score_landscape_2",
+        "score_landscape_3",
+    ]
+    assert len(names) == len(set(names))
+
+
+def test_breakdown_rejects_mismatched_lengths():
+    with pytest.raises(ValueError, match="zip"):
+        breakdown(["a", "b"], [0.1], [0.5])
