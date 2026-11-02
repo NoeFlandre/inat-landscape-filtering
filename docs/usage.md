@@ -3,7 +3,7 @@
 ## Install
 
 1. Install [uv](https://docs.astral.sh/uv/).
-2. Run `uv sync`.
+2. Run `uv sync` (CPU). On NVIDIA GPUs, run `uv sync --no-default-groups --group dev --group cu126`.
 
 To use Docker, build the image with `docker build -t inat-landscape .`.
 
@@ -24,6 +24,9 @@ uv run inat-landscape publish --thresholds 0.0005,0.001,0.002 --cap-per-cell 100
 - `publish --score score_contrast` uses the negative-prompt score for the configs.
 - `embed` and `publish` write to the Hugging Face repository. Set `HF_TOKEN` to a token with write access.
 - To work without the Hugging Face repository, add `--offline` to `embed`, `score` and `publish`.
+
+- `embed --worker I/N` embeds one share of the photos, for parallel jobs. See [Grid'5000](grid5000.md).
+- `state push` and `state pull` move the work files through a private Hugging Face repository.
 
 Use `uv run inat-landscape status` to see the row count of each step.
 Use `uv run inat-landscape COMMAND --help` to see all options.

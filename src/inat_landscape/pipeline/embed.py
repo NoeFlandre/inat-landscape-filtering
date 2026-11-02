@@ -1,6 +1,6 @@
 """Embed stage: download the small photos and store one SigLIP embedding per photo."""
 
-import sys
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,10 +13,12 @@ from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.adapters.images import Fetched, decode, fetch
 from inat_landscape.adapters.inat_dump import PHOTO_URL
+from inat_landscape.domain.sampling import for_worker
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ports import Encoder, Fetcher, Log
+from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE
 
+_LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
@@ -73,10 +75,14 @@ def run_embed(
     *,
     fetcher: Fetcher = fetch,
     chunk: int = 1000,
-    log: Log = lambda m: print(m, file=sys.stderr),
+    worker: tuple[int, int] = (0, 1),
 ) -> EmbedReport:
-    """Embed every sampled photo that has no embedding and no permanent failure."""
+    """Embed every sampled photo of `worker` (index, count) with no embedding and no permanent
+    failure. Parallel workers on other machines share the work through the hub shards."""
     sample = read_sample(workdir)
+    sample = sample.filter(
+        pa.array([for_worker(i, *worker) for i in sample["photo_id"].to_pylist()])
+    )
     store = open_store(workdir, encoder.model_id, hub)
     done = store.done_ids()
     failures = _read_failures(workdir)
@@ -88,7 +94,7 @@ def run_embed(
         ok, bad = _embed_chunk(part, encoder, store, fetcher)
         embedded, failed = embedded + ok, failed + len(bad)
         _record_failures(workdir, failures, part, bad)
-        log(f"embedded {embedded}/{len(todo)}, failed {failed}")
+        _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
     return EmbedReport(
         total=len(ids),
         already=len(done.intersection(ids)),

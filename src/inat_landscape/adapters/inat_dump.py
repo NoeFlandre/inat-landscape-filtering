@@ -266,6 +266,11 @@ def _matched_photos(batch: pa.RecordBatch, obs: _ObservationCells) -> pa.Table:
     )
 
 
+def recap(index: PhotoIndex, cap: int) -> PhotoIndex:
+    """Return the index with at most `cap` photos per cell; the counts do not change."""
+    return PhotoIndex(_compact(index.selected, cap), index.counts)
+
+
 def _compact(table: pa.Table, cap: int) -> pa.Table:
     columns = [table[c].to_numpy() for c in ("h3_cell", "observation_key", "position", "photo_id")]
     return table.take(pa.array(cap_first(*columns, cap)))

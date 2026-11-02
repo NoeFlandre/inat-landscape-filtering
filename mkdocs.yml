@@ -4,6 +4,7 @@ nav:
   - Home: index.md
   - Usage: usage.md
   - Dataset: dataset.md
+  - Grid'5000: grid5000.md
   - Quality: quality.md
   - Decisions:
       - adr/0001-data-source.md
@@ -14,4 +15,5 @@ nav:
       - adr/0006-licences.md
       - adr/0007-density-cap.md
       - adr/0008-negative-prompts.md
+      - adr/0009-grid5000-workers.md
   - Technical debt: tech-debt.md

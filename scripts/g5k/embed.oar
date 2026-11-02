@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Grid'5000 OAR batch job: embed this worker's share of the sample on one GPU.
+#
+# Submit with scripts/g5k/submit.sh (parallel 1-hour jobs, see docs/grid5000.md).
+# The job resumes: the embeddings on the hub are the record of done work.
+#
+#OAR -n inat-landscape-embed
+#OAR -O inat-embed.%jobid%.out
+#OAR -E inat-embed.%jobid%.err
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
+WORKER="${1:-0/1}"  # this worker and the worker count, as I/N
+
+# Storage: /home (25 GB quota) holds only the repository and its environment (about 6 GB).
+# Caches and the work directory go to the node-local /tmp, deleted after the job.
+WORK="/tmp/inat-work-$USER"
+export UV_CACHE_DIR="/tmp/uv-cache-$USER" UV_LINK_MODE=copy HF_HOME="/tmp/hf-$USER"
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+# The token file is created once by the user (chmod 600). It is never in the repository.
+HF_TOKEN="$(cat "$HOME/.hf_token")"
+export HF_TOKEN
+
+export PATH="$HOME/.local/bin:$PATH"
+cd "$REPO_DIR"
+# One environment on the shared /home: parallel jobs take turns to install or check it.
+flock "$HOME/.inat-landscape-uv.lock" sh -c '
+    command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/0.11.32/install.sh | sh
+    uv sync --locked --no-default-groups --group cu126
+'
+run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
+
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+[ -f "$WORK/sample.parquet" ] || run state pull
+run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64

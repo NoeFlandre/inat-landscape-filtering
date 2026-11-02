@@ -51,3 +51,10 @@ def select(candidates: list[Candidate], n: int) -> list[int]:
 
 def _order(c: Candidate) -> tuple[int, int, int]:
     return (uuid_key(c.observation_uuid), c.position, c.photo_id)
+
+
+def for_worker(photo_id: int, worker: int, workers: int) -> bool:
+    """Tell if a photo belongs to `worker` of `workers` parallel workers."""
+    if not 0 <= worker < workers:
+        raise ValueError(f"worker must be in [0, {workers}), got {worker}")
+    return photo_id % workers == worker

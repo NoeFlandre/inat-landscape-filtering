@@ -23,4 +23,3 @@ class Encoder(Protocol):
 
 
 Fetcher = Callable[[Mapping[int, str]], list[Fetched]]
-Log = Callable[[str], None]

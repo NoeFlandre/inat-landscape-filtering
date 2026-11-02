@@ -113,3 +113,15 @@ def test_online_run_uploads_shards_made_offline(setup):
     report = _embed(workdir, hub, encoder)
     assert (report.already, report.embedded, encoder.image_calls) == (4, 0, 0)
     assert len(hub.uploads) == 2
+
+
+def test_workers_split_the_photos_without_overlap(setup, tmp_path):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    other = tmp_path / "other"
+    prepared(other)
+    assert _embed(workdir, hub, FakeEncoder(), worker=(0, 2)).embedded == 1  # 102
+    assert _embed(other, hub, FakeEncoder(), worker=(1, 2)).embedded == 3  # 101, 103, 107
+    encoder = FakeEncoder()
+    assert _embed(workdir, hub, encoder).already == 4
+    assert encoder.image_calls == 0

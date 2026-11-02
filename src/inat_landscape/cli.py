@@ -5,9 +5,10 @@ Exit codes: 0 success, 1 runtime error (message on stderr), 2 usage error.
 
 import argparse
 import json
+import logging
 import sys
 import urllib.error
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -15,8 +16,8 @@ from typing import BinaryIO
 import httpx
 from huggingface_hub.errors import HfHubHTTPError
 
-from inat_landscape.adapters.hub import REPO_ID, HfHub, Hub, OfflineHub
-from inat_landscape.adapters.images import fetch
+from inat_landscape.adapters.hub import REPO_ID, STATE_REPO_ID, HfHub, Hub, OfflineHub
+from inat_landscape.adapters.images import Fetched, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
@@ -24,10 +25,11 @@ from inat_landscape.domain.thresholds import parse_thresholds
 from inat_landscape.pipeline.embed import run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
-from inat_landscape.pipeline.ports import Encoder, Fetcher
+from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.sample import run_sample
 from inat_landscape.pipeline.score import SCORE, run_score
+from inat_landscape.pipeline.state import pull_state, push_state
 from inat_landscape.pipeline.status import run_status
 
 _ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, urllib.error.URLError, OSError)
@@ -39,8 +41,8 @@ def _real_encoder(model_id: str, batch_size: int) -> Encoder:
     return SiglipEncoder(model_id, batch_size)
 
 
-def _real_hub(repo_id: str, offline: bool) -> Hub:
-    return OfflineHub() if offline else HfHub(repo_id)
+def _real_hub(repo_id: str, offline: bool, private: bool = False) -> Hub:
+    return OfflineHub() if offline else HfHub(repo_id, private=private)
 
 
 @dataclass(frozen=True)
@@ -49,19 +51,30 @@ class Deps:
 
     opener: Callable[[str], BinaryIO] = open_source
     encoder: Callable[[str, int], Encoder] = _real_encoder
-    hub: Callable[[str, bool], Hub] = _real_hub
-    fetcher: Fetcher = fetch
+    hub: Callable[..., Hub] = _real_hub
+    fetcher: Callable[..., list[Fetched]] = fetch
 
 
 def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     """Run one command and return its exit code."""
     args = _parser().parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
     try:
         args.handler(args, deps or Deps())
     except _ERRORS as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _worker(raw: str) -> tuple[int, int]:
+    try:
+        worker, workers = (int(part) for part in raw.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"worker must be I/N, got {raw!r}") from None
+    if not 0 <= worker < workers:
+        raise argparse.ArgumentTypeError(f"worker must be in [0, {workers}), got {worker}")
+    return worker, workers
 
 
 def _caps(raw: str) -> tuple[int, ...]:
@@ -94,6 +107,14 @@ def _parser() -> argparse.ArgumentParser:
     _add_embed(sub)
     _add_score(sub)
     _add_publish(sub)
+    state = sub.add_parser("state", help="push or pull the work files to a private hub repo")
+    state.add_argument("action", choices=("push", "pull"), help="direction of the transfer")
+    state.add_argument(
+        "--state-repo",
+        default=STATE_REPO_ID,
+        help=f"private HF dataset repo (default: {STATE_REPO_ID})",
+    )
+    state.set_defaults(handler=_state)
     status = sub.add_parser("status", help="print the row count of each stage output as JSON")
     status.add_argument("--model", default=MODEL_ID, help=f"model id (default: {MODEL_ID})")
     status.set_defaults(handler=_status)
@@ -153,6 +174,15 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
     _hub_options(p)
     p.add_argument("--chunk", type=int, default=1000, help="photos per shard (default: 1000)")
     p.add_argument("--batch-size", type=int, default=32, help="model batch size (default: 32)")
+    p.add_argument(
+        "--worker",
+        type=_worker,
+        default=(0, 1),
+        help="this worker and the worker count, as I/N (default: 0/1)",
+    )
+    p.add_argument(
+        "--concurrency", type=int, default=32, help="parallel photo downloads (default: 32)"
+    )
     p.set_defaults(handler=_embed)
 
 
@@ -211,12 +241,16 @@ def _sample(args: argparse.Namespace, _deps: Deps) -> None:
 
 
 def _embed(args: argparse.Namespace, deps: Deps) -> None:
+    def fetcher(urls: Mapping[int, str]) -> list[Fetched]:
+        return deps.fetcher(urls, concurrency=args.concurrency)
+
     report = run_embed(
         args.workdir,
         deps.encoder(args.model, args.batch_size),
         deps.hub(args.repo_id, args.offline),
-        fetcher=deps.fetcher,
+        fetcher=fetcher,
         chunk=args.chunk,
+        worker=args.worker,
     )
     print(" ".join(f"{k}={v}" for k, v in vars(report).items()))
 
@@ -241,6 +275,12 @@ def _publish(args: argparse.Namespace, deps: Deps) -> None:
     )
     print(f"all={report.total} images_failed={report.images_failed}")
     print(" ".join(f"{s.config}={s.rows}" for s in report.subsets))
+
+
+def _state(args: argparse.Namespace, deps: Deps) -> None:
+    hub = deps.hub(args.state_repo, False, True)
+    move = push_state if args.action == "push" else pull_state
+    print(" ".join(move(args.workdir, hub)))
 
 
 def _status(args: argparse.Namespace, _deps: Deps) -> None:

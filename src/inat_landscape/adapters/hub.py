@@ -8,6 +8,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.errors import RepositoryNotFoundError
 
 REPO_ID = "NoeFlandre/inat-landscape-filtering"
+STATE_REPO_ID = "NoeFlandre/inat-landscape-filtering-state"
 
 
 class Hub(Protocol):
@@ -24,9 +25,12 @@ class Hub(Protocol):
 class HfHub:
     """A public dataset repository on the Hugging Face Hub."""
 
-    def __init__(self, repo_id: str = REPO_ID, api: HfApi | None = None) -> None:
+    def __init__(
+        self, repo_id: str = REPO_ID, api: HfApi | None = None, *, private: bool = False
+    ) -> None:
         self.repo_id = repo_id
         self.api = api or HfApi()
+        self.private = private
         self._created = False
 
     def list_files(self, prefix: str) -> list[str]:
@@ -66,7 +70,9 @@ class HfHub:
 
     def _ensure_repo(self) -> None:
         if not self._created:
-            self.api.create_repo(self.repo_id, repo_type="dataset", private=False, exist_ok=True)
+            self.api.create_repo(
+                self.repo_id, repo_type="dataset", private=self.private, exist_ok=True
+            )
             self._created = True
 
 

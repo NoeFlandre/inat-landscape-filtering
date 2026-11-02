@@ -7,7 +7,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.sampling import Candidate, in_sample, sample_prefix, select, uuid_key
+from inat_landscape.domain.sampling import (
+    Candidate,
+    for_worker,
+    in_sample,
+    sample_prefix,
+    select,
+    uuid_key,
+)
 
 uuids = st.uuids(version=4).map(str)
 fractions = st.floats(min_value=1e-9, max_value=1.0, allow_nan=False)
@@ -94,3 +101,15 @@ def test_uuid_key_is_the_first_16_hex_digits():
 def test_uuid_key_order_matches_uuid_text_order(a, b):
     if a[:18] != b[:18]:
         assert (uuid_key(a) < uuid_key(b)) == (a[:18] < b[:18])
+
+
+@given(st.integers(0, 10**9), st.integers(1, 8))
+def test_each_photo_belongs_to_exactly_one_worker(photo_id, workers):
+    owners = [w for w in range(workers) if for_worker(photo_id, w, workers)]
+    assert len(owners) == 1
+
+
+@pytest.mark.parametrize(("worker", "workers"), [(-1, 2), (2, 2), (0, 0)])
+def test_for_worker_rejects_bad_worker(worker, workers):
+    with pytest.raises(ValueError, match="worker"):
+        for_worker(1, worker, workers)

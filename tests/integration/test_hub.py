@@ -75,3 +75,9 @@ def test_offline_hub_has_no_remote(tmp_path):
     hub.upload_folder(tmp_path, "m", [], [])
     with pytest.raises(FileNotFoundError):
         hub.download("x", tmp_path)
+
+
+def test_private_hub_creates_a_private_repo(tmp_path):
+    api = FakeApi()
+    HfHub("u/state", api=cast("HfApi", api), private=True).upload_file(tmp_path, "x", "m")
+    assert api.calls[0] == ("create", "u/state", "dataset", True, True)

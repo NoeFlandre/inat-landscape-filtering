@@ -99,3 +99,30 @@ def test_eligible_taxa_are_plants_and_life():
     )
     assert eligible_taxa(taxa).tolist() == [47126, 48460, 52775]
     assert eligible_taxa(taxa).dtype == np.int64
+
+
+def test_smaller_cap_is_derived_from_a_cached_larger_cap(tmp_path):
+    calls = []
+    run_index(tmp_path, PARAMS, opener=_opener(calls))
+    small = IngestParams(source="fake://dump", fraction=0.25, res=5, cap=1)
+    derived = run_index(tmp_path, small, opener=_opener(calls))
+    assert len(calls) == 2  # no new pass over the dump
+    direct = run_index(tmp_path / "direct", small, opener=_opener([]))
+    assert derived.selected.sort_by("photo_id").equals(direct.selected.sort_by("photo_id"))
+    assert derived.counts.equals(direct.counts)
+
+
+def test_larger_cap_or_other_resolution_reads_the_dump_again(tmp_path):
+    calls = []
+    run_index(
+        tmp_path,
+        IngestParams(source="fake://dump", fraction=0.25, res=5, cap=1),
+        opener=_opener(calls),
+    )
+    run_index(tmp_path, PARAMS, opener=_opener(calls))
+    run_index(
+        tmp_path,
+        IngestParams(source="fake://dump", fraction=0.25, res=6, cap=1000),
+        opener=_opener(calls),
+    )
+    assert len(calls) == 4  # taxa once, then one index pass each

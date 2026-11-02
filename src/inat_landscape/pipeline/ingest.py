@@ -23,6 +23,7 @@ from inat_landscape.adapters.inat_dump import (
     index_photos,
     open_source,
     read_dump,
+    recap,
     scan_taxa,
 )
 from inat_landscape.domain.licensing import attribution
@@ -55,8 +56,9 @@ def run_index(
 ) -> PhotoIndex:
     """Return the per-cell counts and the capped selection, computing them if needed."""
     stored = read_json(workdir / _INDEX_MANIFEST)
-    if not force and stored == asdict(params):
-        return PhotoIndex(read_table(workdir / SELECTED), read_table(workdir / COUNTS))
+    if not force and _covers(stored, params):
+        cached = PhotoIndex(read_table(workdir / SELECTED), read_table(workdir / COUNTS))
+        return recap(cached, params.cap)
     taxa = _taxa(workdir, params.source, opener)
     with opener(params.source) as stream:
         index = index_photos(
@@ -89,6 +91,16 @@ def run_ingest(
     write_table(table, workdir / CANDIDATES)
     write_json({"params": asdict(params), "candidates": table.num_rows}, workdir / MANIFEST)
     return table
+
+
+def _covers(stored: dict | None, params: IngestParams) -> bool:
+    """Tell if a stored index has the same pool and a cap at least as large."""
+    wanted = asdict(params)
+    return (
+        stored is not None
+        and all(stored.get(k) == wanted[k] for k in ("source", "fraction", "res"))
+        and stored.get("cap", -1) >= params.cap
+    )
 
 
 def eligible_taxa(taxa: pa.Table) -> NDArray[np.int64]:

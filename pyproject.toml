@@ -11,7 +11,6 @@ dependencies = [
     "huggingface-hub>=0.30",
     "pillow>=11",
     "pyarrow>=19",
-    "torch>=2.6",
     "transformers>=4.50",
     "numpy>=2.5.4",
     "matplotlib>=3.11.2",
@@ -36,16 +35,33 @@ dev = [
     "ty>=0.0.1a1",
 ]
 
+# PyTorch build: `cpu` (default, Docker, CI) or `cu126` (Grid'5000 GPUs).
+# GPU nodes: uv sync --no-default-groups --group dev --group cu126
+cpu = ["torch>=2.6"]
+cu126 = ["torch>=2.6"]
+
+[tool.uv]
+default-groups = ["dev", "cpu"]
+conflicts = [[{ group = "cpu" }, { group = "cu126" }]]
+
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu126", group = "cu126" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.ruff]
