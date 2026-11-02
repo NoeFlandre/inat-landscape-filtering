@@ -6,7 +6,7 @@ from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.hub import OfflineHub
 from inat_landscape.adapters.images import fetch
-from inat_landscape.pipeline.embed import FAILURES, HUB_DIR, embedding_dir, run_embed
+from inat_landscape.pipeline.embed import FAILURES, HUB_DIR, embedding_dir, plan_embed, run_embed
 from inat_landscape.pipeline.errors import StageError
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
@@ -125,3 +125,12 @@ def test_workers_split_the_photos_without_overlap(setup, tmp_path):
     encoder = FakeEncoder()
     assert _embed(workdir, hub, encoder).already == 4
     assert encoder.image_calls == 0
+
+
+def test_plan_counts_the_work_left_without_the_model(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(1, 2)) == 3
+    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(1, 2)) == 0
+    assert plan_embed(workdir, FakeEncoder.model_id, hub) == 1

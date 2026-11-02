@@ -22,7 +22,7 @@ from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_sour
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
-from inat_landscape.pipeline.embed import run_embed
+from inat_landscape.pipeline.embed import plan_embed, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.ports import Encoder
@@ -183,6 +183,9 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--concurrency", type=int, default=32, help="parallel photo downloads (default: 32)"
     )
+    p.add_argument(
+        "--plan", action="store_true", help="only print the photos left for this worker (todo=N)"
+    )
     p.set_defaults(handler=_embed)
 
 
@@ -241,6 +244,14 @@ def _sample(args: argparse.Namespace, _deps: Deps) -> None:
 
 
 def _embed(args: argparse.Namespace, deps: Deps) -> None:
+    if args.plan:
+        hub = deps.hub(args.repo_id, args.offline)
+        print(f"todo={plan_embed(args.workdir, args.model, hub, worker=args.worker)}")
+        return
+    _run_embed(args, deps)
+
+
+def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
     def fetcher(urls: Mapping[int, str]) -> list[Fetched]:
         return deps.fetcher(urls, concurrency=args.concurrency)
 

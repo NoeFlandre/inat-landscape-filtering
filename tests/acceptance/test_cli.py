@@ -42,6 +42,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "ingest", "--fraction", "0.25") == 0
     assert _run(deps, tmp_path, "sample") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "1/2", "--concurrency", "4") == 0
+    assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
@@ -60,6 +61,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert "contrast_ge_0_00=" in out
     assert "embedded=3" in out
     assert "embedded=1" in out
+    assert "todo=1" in out
     assert "n=4" in out
     status = json.loads(out.strip().splitlines()[-1])
     assert status == {"candidates": 4, "sample": 4, "embeddings": 4, "failures": 0, "scored": 4}

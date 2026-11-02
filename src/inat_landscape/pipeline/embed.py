@@ -68,6 +68,41 @@ def read_sample(workdir: Path) -> pa.Table:
     return read_table(workdir / SAMPLE)
 
 
+@dataclass(frozen=True)
+class _Work:
+    ids: list[int]
+    store: EmbeddingStore
+    done: set[int]
+    failures: dict[int, dict]
+    permanent: set[int]
+    todo: list[dict]
+
+
+def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _Work:
+    """Return the photos of `worker` and which of them still need an embedding."""
+    sample = read_sample(workdir)
+    mine = [for_worker(i, *worker) for i in sample["photo_id"].to_pylist()]
+    sample = sample.filter(pa.array(mine, pa.bool_()))
+    store = open_store(workdir, model_id, hub)
+    done = store.done_ids()
+    failures = _read_failures(workdir)
+    permanent = _permanent(failures) - done
+    rows = sample.select(["photo_id", "extension"]).to_pylist()
+    return _Work(
+        sample["photo_id"].to_pylist(),
+        store,
+        done,
+        failures,
+        permanent,
+        _todo(rows, done | permanent),
+    )
+
+
+def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: tuple[int, int] = (0, 1)) -> int:
+    """Return how many photos of `worker` still need an embedding. Loads no model."""
+    return len(_work(workdir, model_id, hub, worker).todo)
+
+
 def run_embed(
     workdir: Path,
     encoder: Encoder,
@@ -79,26 +114,17 @@ def run_embed(
 ) -> EmbedReport:
     """Embed every sampled photo of `worker` (index, count) with no embedding and no permanent
     failure. Parallel workers on other machines share the work through the hub shards."""
-    sample = read_sample(workdir)
-    sample = sample.filter(
-        pa.array([for_worker(i, *worker) for i in sample["photo_id"].to_pylist()])
-    )
-    store = open_store(workdir, encoder.model_id, hub)
-    done = store.done_ids()
-    failures = _read_failures(workdir)
-    ids = sample["photo_id"].to_pylist()
-    permanent = _permanent(failures) - done
-    todo = _todo(sample.select(["photo_id", "extension"]).to_pylist(), done | permanent)
+    work = _work(workdir, encoder.model_id, hub, worker)
     embedded = failed = 0
-    for part in _chunks(todo, chunk):
-        ok, bad = _embed_chunk(part, encoder, store, fetcher)
+    for part in _chunks(work.todo, chunk):
+        ok, bad = _embed_chunk(part, encoder, work.store, fetcher)
         embedded, failed = embedded + ok, failed + len(bad)
-        _record_failures(workdir, failures, part, bad)
-        _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
+        _record_failures(workdir, work.failures, part, bad)
+        _LOG.info("embedded %d/%d, failed %d", embedded, len(work.todo), failed)
     return EmbedReport(
-        total=len(ids),
-        already=len(done.intersection(ids)),
-        skipped=len(permanent.intersection(ids)),
+        total=len(work.ids),
+        already=len(work.done.intersection(work.ids)),
+        skipped=len(work.permanent.intersection(work.ids)),
         embedded=embedded,
         failed=failed,
     )

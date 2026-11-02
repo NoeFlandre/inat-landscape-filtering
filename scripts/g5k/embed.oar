@@ -2,7 +2,8 @@
 # Grid'5000 OAR batch job: embed this worker's share of the sample on one GPU.
 #
 # Submit with scripts/g5k/submit.sh (parallel 1-hour jobs, see docs/grid5000.md).
-# The job resumes: the embeddings on the hub are the record of done work.
+# The job resumes: the embeddings on the hub are the record of done work. While photos are
+# left, each job queues its successor, so one submission runs the work to the end.
 #
 #OAR -n inat-landscape-embed
 #OAR -O inat-embed.%jobid%.out
@@ -32,4 +33,11 @@ run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 [ -f "$WORK/sample.parquet" ] || run state pull
+todo="$(run embed --worker "$WORKER" --plan | sed -n 's/^todo=//p')"
+echo "worker $WORKER: ${todo:-?} photos left"
+[ "${todo:-0}" -gt 0 ] || exit 0
+# Queue the next 1-hour job of this worker. It starts after this one ends, and it stops at
+# once when no photo is left. So the chain ends by itself.
+oarsub -a "$OAR_JOB_ID" -l "host=1/gpu=1,walltime=1:00:00" "$REPO_DIR/scripts/g5k/embed.oar $WORKER" \
+    || echo "could not queue the next job: run scripts/g5k/submit.sh again" >&2
 run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64
