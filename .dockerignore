@@ -1,0 +1,6 @@
+.venv
+work
+mutants
+site
+.git
+**/__pycache__

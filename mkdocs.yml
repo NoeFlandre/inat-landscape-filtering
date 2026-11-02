@@ -1,0 +1,15 @@
+site_name: iNaturalist landscape filtering
+repo_url: https://github.com/NoeFlandre/inat-landscape-filtering
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Dataset: dataset.md
+  - Quality: quality.md
+  - Decisions:
+      - adr/0001-data-source.md
+      - adr/0002-siglip-zero-shot.md
+      - adr/0003-score-small-images.md
+      - adr/0004-taxa-scope.md
+      - adr/0005-storage-and-resume.md
+      - adr/0006-licences.md
+  - Technical debt: tech-debt.md

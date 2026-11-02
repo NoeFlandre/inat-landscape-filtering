@@ -1,0 +1,114 @@
+[project]
+name = "inat-landscape"
+version = "0.1.0"
+description = "Filter iNaturalist photos to keep landscape views, with zero-shot SigLIP2 scores."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Noé Flandre" }]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28",
+    "huggingface-hub>=0.30",
+    "pillow>=11",
+    "pyarrow>=19",
+    "torch>=2.6",
+    "transformers>=4.50",
+    "numpy>=2.5.4",
+]
+
+[project.scripts]
+inat-landscape = "inat_landscape.cli:main"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.120",
+    "import-linter>=2.1",
+    "mkdocs>=1.6",
+    "mutmut>=3.2",
+    "protobuf>=7.36.2",
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "radon>=6",
+    "ruff>=0.9",
+    "sentencepiece>=0.2.2",
+    "ty>=0.0.1a1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# E/W/F: pycodestyle + pyflakes. I: import order. B: bugbear. UP: modern syntax.
+# SIM: simplifications. C90: cyclomatic complexity. N: naming. PT: pytest style.
+# PL: pylint subset. RUF: ruff rules. S: security (bandit). ARG: unused arguments.
+# PTH: pathlib. TID: tidy imports (no relative parent imports).
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "C90", "N", "PT", "PL", "RUF", "S", "ARG", "PTH", "TID"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 5
+
+[tool.ruff.lint.pylint]
+max-args = 6
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "S310", "S311", "ARG"]  # fakes must match real signatures
+"scripts/**" = ["S101", "S603", "S607", "PLR2004"]  # dev tools run fixed local commands
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = ["slow: needs network or the real model; not run by default"]
+
+[tool.coverage.run]
+branch = true
+source = ["inat_landscape"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_also = ["if __name__ == .__main__.:"]
+
+[tool.importlinter]
+root_package = "inat_landscape"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: cli -> pipeline -> adapters -> domain"
+type = "layers"
+layers = [
+    "inat_landscape.cli",
+    "inat_landscape.pipeline",
+    "inat_landscape.adapters",
+    "inat_landscape.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure: no I/O or ML frameworks"
+type = "forbidden"
+source_modules = ["inat_landscape.domain"]
+forbidden_modules = ["httpx", "huggingface_hub", "torch", "transformers", "PIL", "pyarrow", "urllib", "tarfile", "pathlib", "os", "subprocess"]
+
+[tool.mutmut]
+source_paths = ["src/inat_landscape/domain/"]
+pytest_add_cli_args_test_selection = ["tests/unit/"]
+
+[tool.ty.analysis]
+# pyarrow.compute builds its functions at import time; static checkers cannot see them.
+replace-imports-with-any = ["pyarrow.compute"]

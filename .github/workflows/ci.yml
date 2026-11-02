@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Lint
+        run: make lint
+      - name: Types
+        run: make types
+      - name: Tests, coverage and CRAP
+        run: make crap
+      - name: Architecture
+        run: make arch
+      - name: Mutation
+        run: make mutation
+      - name: Smoke
+        run: make smoke
+      - name: Docs
+        run: make docs
