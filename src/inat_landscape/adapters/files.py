@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 
@@ -19,6 +20,11 @@ def write_table(table: pa.Table, path: Path) -> None:
 def read_table(path: Path, columns: list[str] | None = None) -> pa.Table:
     """Read a Parquet file, or only some of its columns."""
     return pq.read_table(path, columns=columns)
+
+
+def read_rows(path: Path, column: str, values: list[int]) -> pa.Table:
+    """Read only the rows of a Parquet file whose `column` is in `values`."""
+    return pq.read_table(path, filters=pc.field(column).isin(values))
 
 
 def write_json(data: dict[str, Any], path: Path) -> None:

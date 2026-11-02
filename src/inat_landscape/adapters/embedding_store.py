@@ -72,16 +72,32 @@ class EmbeddingStore:
         return path
 
     def load(self) -> tuple[list[int], np.ndarray]:
-        """Return all ids and the float16 embeddings (as stored). Each id appears once."""
-        tables = [read_table(s) for s in self._shards()]
-        if not tables:
+        """Return all ids and the float16 embeddings (as stored). Each id appears once.
+
+        The shards are copied one by one into one preallocated array, so the memory peak is
+        the array plus one shard.
+        """
+        shards = self._shards()
+        if not shards:
             return [], np.zeros((0, 0), np.float16)
-        table = pa.concat_tables(tables)
-        ids = table["photo_id"].to_pylist()
-        first = sorted({i: n for n, i in reversed(list(enumerate(ids)))}.values())
-        flat = table["embedding"].combine_chunks().flatten().to_numpy()
-        matrix = flat.reshape(table.num_rows, -1)
+        ids, matrix = self._read_into_one_array(shards)
+        first = _first_positions(ids)
+        if len(first) == len(ids):
+            return ids, matrix
         return [ids[n] for n in first], matrix[first]
+
+    def _read_into_one_array(self, shards: list[Path]) -> tuple[list[int], np.ndarray]:
+        counts = [pq.ParquetFile(s).metadata.num_rows for s in shards]
+        matrix = np.empty((sum(counts), self.dim()), np.float16)
+        ids: list[int] = []
+        start = 0
+        for shard in shards:
+            table = read_table(shard)
+            rows = table["embedding"].combine_chunks().flatten().to_numpy()
+            matrix[start : start + table.num_rows] = rows.reshape(table.num_rows, -1)
+            ids += table["photo_id"].to_pylist()
+            start += table.num_rows
+        return ids, matrix
 
     def dim(self) -> int:
         """Return the embedding length, or 0 when the store is empty."""
@@ -90,3 +106,8 @@ class EmbeddingStore:
 
     def _shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))
+
+
+def _first_positions(ids: list[int]) -> list[int]:
+    """Return, in order, the position of the first copy of each id."""
+    return sorted({i: n for n, i in reversed(list(enumerate(ids)))}.values())

@@ -4,9 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 
-from inat_landscape.adapters.files import write_table
+from inat_landscape.adapters.files import read_rows, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.scoring import (
     CLOSEUP_PROMPTS,
@@ -20,19 +19,20 @@ from inat_landscape.domain.scoring import (
 from inat_landscape.pipeline.embed import open_store, read_sample
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ports import Encoder
+from inat_landscape.pipeline.sample import SAMPLE
 
 SCORED = "scored.parquet"
 SCORE = "score_landscape"
-SCORE_ROWS = 100_000  # embeddings scored at a time, to bound the memory
+SCORE_ROWS = 20_000  # embeddings scored at a time, to bound the memory
 
 
 def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
     """Write and return the sample photos that have an embedding, with their scores."""
-    table, images = _embedded_sample(workdir, encoder.model_id, hub)
+    table, images, order = _embedded_sample(workdir, encoder.model_id, hub)
     directions = _directions(encoder)
     parts = [
-        _score_columns(images[i : i + SCORE_ROWS], directions, encoder)
-        for i in range(0, len(images), SCORE_ROWS)
+        _score_columns(images[order[i : i + SCORE_ROWS]], directions, encoder)
+        for i in range(0, len(order), SCORE_ROWS)
     ]
     for name in parts[0]:
         table = table.append_column(name, pa.array(np.concatenate([p[name] for p in parts])))
@@ -40,15 +40,18 @@ def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
     return table
 
 
-def _embedded_sample(workdir: Path, model_id: str, hub: Hub) -> tuple[pa.Table, np.ndarray]:
-    """Return the sample rows that have an embedding, and their embeddings in row order."""
-    sample = read_sample(workdir)
+def _embedded_sample(
+    workdir: Path, model_id: str, hub: Hub
+) -> tuple[pa.Table, np.ndarray, np.ndarray]:
+    """Return the sample rows that have an embedding, all embeddings, and for each row the
+    position of its embedding. No full copy of the embeddings is made."""
     ids, embeddings = open_store(workdir, model_id, hub).load()
     if not ids:
         raise StageError("no embeddings: run `embed` first")
-    table = sample.filter(pc.is_in(sample["photo_id"], pa.array(ids, pa.int64())))
+    read_sample(workdir, columns=["photo_id"])  # fails clearly if the sample is missing
+    table = read_rows(workdir / SAMPLE, "photo_id", ids)
     row = {photo_id: n for n, photo_id in enumerate(ids)}
-    return table, embeddings[[row[i] for i in table["photo_id"].to_pylist()]]
+    return table, embeddings, np.array([row[i] for i in table["photo_id"].to_pylist()])
 
 
 def _directions(encoder: Encoder) -> dict[str, tuple[str, np.ndarray]]:
