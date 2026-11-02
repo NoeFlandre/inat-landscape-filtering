@@ -134,3 +134,24 @@ def test_plan_counts_the_work_left_without_the_model(setup):
     _embed(workdir, hub, FakeEncoder(), worker=(1, 2))
     assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(1, 2)) == 0
     assert plan_embed(workdir, FakeEncoder.model_id, hub) == 1
+
+
+def test_shards_gather_several_download_batches(setup, monkeypatch):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    monkeypatch.setattr("inat_landscape.pipeline.embed.DOWNLOAD_BATCH", 1)
+    report = run_embed(
+        workdir, FakeEncoder(), hub, fetcher=lambda u: fetch(u, backoff=0.0), chunk=3
+    )
+    assert report.embedded == 4
+    assert len(hub.uploads) == 2  # 3 photos, then 1
+
+
+def test_a_download_error_stops_the_run(setup):
+    workdir, _handler, hub = setup
+
+    def broken(_urls):
+        raise RuntimeError("network down")
+
+    with pytest.raises(RuntimeError, match="network down"):
+        run_embed(workdir, FakeEncoder(), hub, fetcher=broken, chunk=2)

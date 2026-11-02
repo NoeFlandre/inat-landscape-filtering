@@ -19,10 +19,10 @@ Each item tells why it exists and how to remove it.
 - **Effect:** with tens of millions of capped photos, the details join and the medium images in `publish` can exceed the memory.
 - **Cleanup:** write the details and the configs in parts, and stream the images.
 
-## Embed runs download and model one after the other
+## Photos decode on the CPU
 
-- **Why:** for the pilot, the model takes most of the time. The download of a chunk takes a few seconds.
-- **Cleanup:** at scale, download the next chunk while the model runs. Decode JPEG on the GPU.
+- **Why:** a background thread downloads and decodes the next photos while the model runs, and a thread pool resizes them. This keeps one GPU busy.
+- **Cleanup:** if the CPU of a GPU node becomes the limit, decode the JPEG files on the GPU.
 
 ## `done_ids` reads every shard
 

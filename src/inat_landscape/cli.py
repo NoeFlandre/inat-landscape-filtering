@@ -35,10 +35,10 @@ from inat_landscape.pipeline.status import run_status
 _ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, urllib.error.URLError, OSError)
 
 
-def _real_encoder(model_id: str, batch_size: int) -> Encoder:
+def _real_encoder(model_id: str, batch_size: int, compile: bool = False) -> Encoder:
     from inat_landscape.adapters.encoder import SiglipEncoder  # noqa: PLC0415 - torch is slow to import
 
-    return SiglipEncoder(model_id, batch_size)
+    return SiglipEncoder(model_id, batch_size, compile=compile)
 
 
 def _real_hub(repo_id: str, offline: bool, private: bool = False) -> Hub:
@@ -50,7 +50,7 @@ class Deps:
     """The outside world, replaceable in tests."""
 
     opener: Callable[[str], BinaryIO] = open_source
-    encoder: Callable[[str, int], Encoder] = _real_encoder
+    encoder: Callable[..., Encoder] = _real_encoder
     hub: Callable[..., Hub] = _real_hub
     fetcher: Callable[..., list[Fetched]] = fetch
 
@@ -186,6 +186,12 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--plan", action="store_true", help="only print the photos left for this worker (todo=N)"
     )
+    p.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="compile the vision model with torch.compile (default: on)",
+    )
     p.set_defaults(handler=_embed)
 
 
@@ -257,7 +263,7 @@ def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
 
     report = run_embed(
         args.workdir,
-        deps.encoder(args.model, args.batch_size),
+        deps.encoder(args.model, args.batch_size, args.compile),
         deps.hub(args.repo_id, args.offline),
         fetcher=fetcher,
         chunk=args.chunk,

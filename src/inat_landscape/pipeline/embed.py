@@ -1,6 +1,10 @@
 """Embed stage: download the small photos and store one SigLIP embedding per photo."""
 
 import logging
+import queue
+import threading
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +24,8 @@ from inat_landscape.pipeline.sample import SAMPLE
 
 _LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
+DOWNLOAD_BATCH = 2048  # photos per download batch; a shard gathers batches up to `chunk`
+_DECODE_THREADS = 4
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
 _FAILURE_SCHEMA = pa.schema(
@@ -115,12 +121,15 @@ def run_embed(
     """Embed every sampled photo of `worker` (index, count) with no embedding and no permanent
     failure. Parallel workers on other machines share the work through the hub shards."""
     work = _work(workdir, encoder.model_id, hub, worker)
+    shard = _Shard(work.store, chunk)
     embedded = failed = 0
-    for part in _chunks(work.todo, chunk):
-        ok, bad = _embed_chunk(part, encoder, work.store, fetcher)
-        embedded, failed = embedded + ok, failed + len(bad)
+    for part, ids, images, bad in _prefetched(work.todo, fetcher, min(chunk, DOWNLOAD_BATCH)):
+        if ids:
+            shard.add(ids, np.asarray(encoder.encode_images(images)))
+        embedded, failed = embedded + len(ids), failed + len(bad)
         _record_failures(workdir, work.failures, part, bad)
         _LOG.info("embedded %d/%d, failed %d", embedded, len(work.todo), failed)
+    shard.flush()
     return EmbedReport(
         total=len(work.ids),
         already=len(work.done.intersection(work.ids)),
@@ -142,26 +151,71 @@ def _chunks(items: list[dict], size: int) -> list[list[dict]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
-def _embed_chunk(
-    part: list[dict], encoder: Encoder, store: EmbeddingStore, fetcher: Fetcher
-) -> tuple[int, list[dict]]:
-    urls = {r["photo_id"]: photo_url(r["photo_id"], SCORING_SIZE, r["extension"]) for r in part}
-    ids, images, failed = _decode_all(fetcher(urls))
-    if ids:
-        store.add(ids, np.asarray(encoder.encode_images(images)))
-    return len(ids), failed
+class _Shard:
+    """Embeddings waiting to be written; a shard is written every `size` photos."""
+
+    def __init__(self, store: EmbeddingStore, size: int) -> None:
+        self.store, self.size = store, size
+        self.ids: list[int] = []
+        self.rows: list[np.ndarray] = []
+
+    def add(self, ids: list[int], rows: np.ndarray) -> None:
+        self.ids += ids
+        self.rows.append(rows)
+        if len(self.ids) >= self.size:
+            self.flush()
+
+    def flush(self) -> None:
+        if self.ids:
+            self.store.add(self.ids, np.concatenate(self.rows))
+            self.ids, self.rows = [], []
+
+
+_Batch = tuple[list[dict], list[int], list[Image.Image], list[dict]]
+
+
+def _prefetched(todo: list[dict], fetcher: Fetcher, size: int) -> Iterator[_Batch]:
+    """Yield (rows, ok ids, images, failures) per batch, downloaded in a background thread.
+
+    The next batches download and decode while the caller encodes the current one.
+    """
+    batches: queue.Queue[_Batch | Exception | None] = queue.Queue(maxsize=2)
+    threading.Thread(target=_produce, args=(todo, fetcher, size, batches), daemon=True).start()
+    while (item := batches.get()) is not None:
+        if isinstance(item, Exception):
+            raise item
+        yield item
+
+
+def _produce(
+    todo: list[dict], fetcher: Fetcher, size: int, out: "queue.Queue[_Batch | Exception | None]"
+) -> None:
+    try:
+        for part in _chunks(todo, size):
+            urls = {
+                r["photo_id"]: photo_url(r["photo_id"], SCORING_SIZE, r["extension"]) for r in part
+            }
+            out.put((part, *_decode_all(fetcher(urls))))
+        out.put(None)
+    except Exception as exc:
+        out.put(exc)
 
 
 def _decode_all(results: list[Fetched]) -> tuple[list[int], list[Image.Image], list[dict]]:
     ids, images, failed = [], [], []
-    for result in results:
-        image = decode(result.data) if result.data is not None else None
+    with ThreadPoolExecutor(_DECODE_THREADS) as pool:
+        decoded = list(pool.map(_decode_or_none, results))
+    for result, image in zip(results, decoded, strict=True):
         if image is None:
             failed.append(_failure(result))
         else:
             ids.append(result.photo_id)
             images.append(image)
     return ids, images, failed
+
+
+def _decode_or_none(result: Fetched) -> Image.Image | None:
+    return decode(result.data) if result.data is not None else None
 
 
 def _failure(result: Fetched) -> dict:

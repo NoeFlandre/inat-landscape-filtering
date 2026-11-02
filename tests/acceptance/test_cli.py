@@ -27,7 +27,7 @@ def deps(tmp_path, server, monkeypatch):
     hub = FakeHub(tmp_path / "remote")
     return Deps(
         opener=lambda _s: io.BytesIO(fakes.make_dump()),
-        encoder=lambda _model, _batch: FakeEncoder(),
+        encoder=lambda *_args: FakeEncoder(),
         hub=lambda *_args: hub,
         fetcher=lambda urls, **kw: fetch(urls, backoff=0.0, **kw),
     )
@@ -41,7 +41,9 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "measure", "--fraction", "0.25", "--caps", "1,10") == 0
     assert _run(deps, tmp_path, "ingest", "--fraction", "0.25") == 0
     assert _run(deps, tmp_path, "sample") == 0
-    assert _run(deps, tmp_path, "embed", "--worker", "1/2", "--concurrency", "4") == 0
+    assert (
+        _run(deps, tmp_path, "embed", "--worker", "1/2", "--concurrency", "4", "--no-compile") == 0
+    )
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
@@ -110,9 +112,9 @@ def test_default_deps_build_real_adapters_lazily():
     private = real.hub("u/r", False, True)
     assert isinstance(private, HfHub)
     assert private.private
-    encoder = real.encoder("some/model", 8)
+    encoder = real.encoder("some/model", 8, True)
     assert isinstance(encoder, SiglipEncoder)
-    assert (encoder.model_id, encoder.batch_size) == ("some/model", 8)
+    assert (encoder.model_id, encoder.batch_size, encoder.compile) == ("some/model", 8, True)
 
 
 @pytest.mark.parametrize("worker", ["2/2", "x", "1"])

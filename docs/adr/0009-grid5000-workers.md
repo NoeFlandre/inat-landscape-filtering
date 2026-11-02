@@ -20,3 +20,9 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - The run time goes down with the number of workers, and the jobs respect the policy at all hours.
 - Each job reads the shards of the other workers to know what is done. This is a few GB per job.
 - `score` and `publish` run outside Grid'5000.
+
+## Speed (2026-11-02)
+
+- The vision model runs under bf16 autocast on CPUs with AMX or AVX-512 BF16, and under bf16 or fp16 on GPUs. `torch.compile` is on by default (`--no-compile` to stop it).
+- Photos are resized with PIL, as the model processor does, in a thread pool. A background thread downloads and decodes the next photos while the model runs.
+- On the 4-core CPU of the work machine: 5.6 photos per second before, about 16 after. The embeddings stay within a cosine of 0.997 (median 0.9999) of the fp32 embeddings, which is the noise of the float16 storage.
