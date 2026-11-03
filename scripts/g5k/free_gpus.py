@@ -5,6 +5,7 @@ Standard library only: it runs on the frontends, which do not have the project e
 
     python3 free_gpus.py                    # on a frontend: free GPUs per cluster (JSON lines)
     python3 free_gpus.py plan N SLOTS SITE.jsonl…   # give free slots of N (SLOTS: 1,4,…) to GPUs
+    python3 free_gpus.py seats SITE.jsonl…          # one line per free GPU: site and options
 """
 
 import json
@@ -29,7 +30,7 @@ def clusters(cores: list[dict]) -> list[dict]:
     """
     found: dict[str, dict] = {}
     for (cluster, _, _), (core, free) in sorted(_gpus(cores).items()):
-        if usable(core.get("gpu_model") or ""):
+        if usable(core.get("gpu_model") or "") and core.get("cpuarch", "x86_64") == "x86_64":
             entry = found.setdefault(
                 cluster, {"cluster": cluster, "free": 0, "options": _options(core)}
             )
@@ -53,17 +54,21 @@ def _options(core: dict) -> list[str]:
     return [*options, "-p", f"cluster='{core['cluster']}'"]
 
 
-def plan(found: dict[str, list[dict]], *, count: int, slots: list[int]) -> list[dict]:
-    """Give the free `slots` of `count` worker slots to the free GPUs, one slot each."""
-    seats = [
+def seats(found: dict[str, list[dict]]) -> list[tuple[str, list[str]]]:
+    """Return (site, oarsub options) once for each free GPU."""
+    return [
         (site, entry["options"])
         for site, entries in found.items()
         for entry in entries
         for _ in range(entry["free"])
     ]
+
+
+def plan(found: dict[str, list[dict]], *, count: int, slots: list[int]) -> list[dict]:
+    """Give the free `slots` of `count` worker slots to the free GPUs, one slot each."""
     return [
         {"slot": f"{slot}/{count}", "site": site, "options": options}
-        for slot, (site, options) in zip(slots, seats, strict=False)
+        for slot, (site, options) in zip(slots, seats(found), strict=False)
     ]
 
 
@@ -73,14 +78,19 @@ def _oar_cores() -> list[dict]:
     return list(data.values()) if isinstance(data, dict) else data
 
 
+def _read(paths: list[str]) -> dict[str, list[dict]]:
+    return {
+        Path(p).stem: [json.loads(line) for line in Path(p).read_text().splitlines() if line]
+        for p in paths
+    }
+
+
 def main(argv: list[str]) -> None:
-    if argv[:1] == ["plan"]:
+    if argv[:1] == ["seats"]:
+        lines = [{"site": site, "options": options} for site, options in seats(_read(argv[1:]))]
+    elif argv[:1] == ["plan"]:
         count, slots = int(argv[1]), [int(s) for s in argv[2].split(",") if s]
-        found = {
-            Path(p).stem: [json.loads(line) for line in Path(p).read_text().splitlines() if line]
-            for p in argv[3:]
-        }
-        lines = plan(found, count=count, slots=slots)
+        lines = plan(_read(argv[3:]), count=count, slots=slots)
     else:
         lines = clusters(_oar_cores())
     for line in lines:

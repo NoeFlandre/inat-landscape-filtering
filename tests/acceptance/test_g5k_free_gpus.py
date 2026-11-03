@@ -25,6 +25,7 @@ def _core(host, gpu, *, cluster="chuc", model="A100-SXM4-40GB", jobs=None, **kw)
         "state": kw.get("state", "Alive"),
         "jobs": jobs,
         "exotic": kw.get("exotic", "NO"),
+        "cpuarch": kw.get("cpuarch", "x86_64"),
         "production": kw.get("production", "NO"),
     }
 
@@ -120,3 +121,19 @@ def test_a_slot_is_required_to_submit():
     )
     assert run.returncode != 0
     assert "usage" in run.stderr
+
+
+def test_gpus_of_non_x86_nodes_are_left_out():
+    cores = [_core("drac1", 1, cluster="drac", model="Tesla P100-SXM2-16GB", cpuarch="ppc64le")]
+    assert free_gpus.clusters(cores) == []
+
+
+def test_seats_lists_one_line_per_free_gpu(tmp_path):
+    site = tmp_path / "lille.jsonl"
+    site.write_text(json.dumps({"cluster": "chuc", "free": 2, "options": ["-p", "x"]}) + "\n")
+    command = [sys.executable, str(SCRIPT), "seats", str(site)]
+    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout  # noqa: S603
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"site": "lille", "options": ["-p", "x"]},
+        {"site": "lille", "options": ["-p", "x"]},
+    ]

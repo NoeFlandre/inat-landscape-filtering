@@ -39,20 +39,29 @@ import sys
 busy = {int(line.split("-")[0]) for line in open(sys.argv[2]) if line.strip()}
 print(",".join(str(i) for i in range(int(sys.argv[1])) if i not in busy))
 ' "$count" "$tmp/busy")"
-python3 "$here/free_gpus.py" plan "$count" "$free_slots" "$tmp"/*.jsonl > "$tmp/plan.jsonl"
-echo "free slots: $(tr ',' '\n' <<< "$free_slots" | grep -c . || true), free GPUs used: $(wc -l < "$tmp/plan.jsonl")"
-[ -s "$tmp/plan.jsonl" ] || exit 0
+python3 "$here/free_gpus.py" seats "$tmp"/*.jsonl > "$tmp/seats.jsonl"
+read -ra pending <<< "${free_slots//,/ }"
+echo "free slots: ${#pending[@]}, free GPUs: $(wc -l < "$tmp/seats.jsonl")"
+[ ${#pending[@]} -gt 0 ] && [ -s "$tmp/seats.jsonl" ] || exit 0
 
-for site in $(python3 -c 'import json,sys; print(*sorted({json.loads(l)["site"] for l in sys.stdin}))' < "$tmp/plan.jsonl"); do
+for site in $(python3 -c 'import json,sys; print(*sorted({json.loads(l)["site"] for l in sys.stdin}))' < "$tmp/seats.jsonl"); do
     ssh "$site" "if [ -d inat-landscape-filtering/.git ]; then git -C inat-landscape-filtering pull -q --ff-only; else git clone -q -b $branch $repo inat-landscape-filtering; fi"
 done
-# One submission for each slot, on the site of its GPU, with the oarsub options of its cluster.
+# Give each free slot to a free GPU, on the site of the GPU, with the oarsub options of its
+# cluster. When OAR refuses a GPU (it can look free and still be refused), the slot goes to
+# the next GPU.
 python3 -c '
 import json, shlex, sys
 for line in sys.stdin:
     s = json.loads(line)
-    args = " ".join(shlex.quote(a) for a in [s["slot"], *s["options"]])
-    print(s["site"], shlex.quote("cd inat-landscape-filtering && ./scripts/g5k/submit.sh " + args))
-' < "$tmp/plan.jsonl" | while read -r site command; do
-    echo "$site: $(ssh -n "$site" "eval $command" 2>&1 | tail -1)"
-done
+    print(s["site"], " ".join(shlex.quote(a) for a in s["options"]))
+' < "$tmp/seats.jsonl" > "$tmp/seats.txt"
+while read -r site options; do
+    [ ${#pending[@]} -gt 0 ] || break
+    slot="${pending[0]}/$count"
+    command="cd inat-landscape-filtering && ./scripts/g5k/submit.sh $slot $options"
+    out="$(ssh -n "$site" "$command" 2>&1 | tail -1)"
+    echo "$site $slot: $out"
+    if grep -q OAR_JOB_ID= <<< "$out"; then pending=("${pending[@]:1}"); fi
+done < "$tmp/seats.txt"
+echo "slots left without a GPU: ${#pending[@]}"
