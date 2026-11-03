@@ -177,3 +177,14 @@ def test_card_with_all_layers_does_not_talk_of_layers():
     info = _info()
     card = render_card(replace(info, layer_cap=3, embed_cap=1000, total=info.candidates))
     assert "grows by layers" not in card
+
+
+def test_a_finished_run_says_it_is_complete_with_its_failed_downloads():
+    info = _info()
+    done = replace(info, layer_cap=1000, embed_cap=1000, total=info.candidates - 2)
+    card = render_card(done)
+    assert "grows by layers" not in card
+    assert (
+        f"The run is complete: {info.candidates - 2:,} of the {info.candidates:,} sample " in card
+    )
+    assert "photos have an embedding (2 downloads failed)." in card

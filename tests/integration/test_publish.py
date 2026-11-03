@@ -124,7 +124,7 @@ def test_card_figures_and_upload(scored):
     assert "**4 iNaturalist photos of all taxa (4 with a location)" in card
     assert "| plantae | 2 | 2 |" in card
     assert "This gave 4 photos." in card
-    assert "All 4 sample photos are scored." in card
+    assert "The run is complete: 4 of the 4 sample photos have an embedding (0 downloads" in card
     assert "come with the URL of their 500 px image" not in card
     for name in ("hero", "map", "scores"):
         png = workdir / HUB_DIR / "assets" / f"{name}.png"

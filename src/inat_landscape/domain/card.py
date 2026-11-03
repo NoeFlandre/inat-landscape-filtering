@@ -403,18 +403,29 @@ the organism was, not the area in view.
 
 
 def _progress(info: CardInfo) -> str:
-    if info.layer_cap is not None and info.total < info.candidates:
-        return (
-            f"The dataset grows by layers: each H3 cell has its first {info.layer_cap:,} photos "
-            f"in a random order (or all its photos, if it has fewer), on the way to "
-            f"{info.embed_cap:,} per cell. Each new version adds the next layers."
-        )
+    if info.layer_cap is not None:
+        return _layers_progress(info, info.layer_cap)
     if info.total < info.candidates:
         return (
             f"The run is in progress: {info.total:,} of the {info.candidates:,} sample "
             "photos are scored."
         )
     return f"All {info.candidates:,} sample photos are scored."
+
+
+def _layers_progress(info: CardInfo, layer_cap: int) -> str:
+    """The progress of a run by layers (ADR 0011)."""
+    if layer_cap >= info.embed_cap or info.total >= info.candidates:
+        failed = info.candidates - info.total
+        return (
+            f"The run is complete: {info.total:,} of the {info.candidates:,} sample photos have "
+            f"an embedding ({failed:,} downloads failed)."
+        )
+    return (
+        f"The dataset grows by layers: each H3 cell has its first {layer_cap:,} photos "
+        f"in a random order (or all its photos, if it has fewer), on the way to "
+        f"{info.embed_cap:,} per cell. Each new version adds the next layers."
+    )
 
 
 def _missing_locations(count: int) -> str:
