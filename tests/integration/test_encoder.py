@@ -68,14 +68,18 @@ def test_logit_scale_and_bias_are_floats(encoder):
 
 
 @pytest.mark.parametrize(
-    ("device", "flags", "cuda_bf16", "expected"),
+    ("device", "flags", "capability", "expected"),
     [
-        ("cpu", "fpu avx2 amx_bf16", False, torch.bfloat16),
-        ("cpu", "fpu avx512_bf16", False, torch.bfloat16),
-        ("cpu", "fpu avx2", False, None),
-        ("cuda", "", True, torch.bfloat16),
-        ("cuda", "", False, torch.float16),
+        ("cpu", "fpu avx2 amx_bf16", None, torch.bfloat16),
+        ("cpu", "fpu avx512_bf16", None, torch.bfloat16),
+        ("cpu", "fpu avx2", None, None),
+        ("cuda", "", (9, 0), torch.bfloat16),  # Hopper
+        ("cuda", "", (8, 6), torch.bfloat16),  # Ampere: native bf16
+        ("cuda", "", (7, 5), torch.float16),  # Turing: bf16 is only emulated (slow)
+        ("cuda", "", (7, 0), torch.float16),  # Volta
+        ("cuda", "", (6, 0), torch.float16),  # P100: fast fp16
+        ("cuda", "", (6, 1), None),  # GeForce Pascal: fp16 at 1/64 speed
     ],
 )
-def test_autocast_dtype(device, flags, cuda_bf16, expected):
-    assert autocast_dtype(device, flags, cuda_bf16) == expected
+def test_autocast_dtype(device, flags, capability, expected):
+    assert autocast_dtype(device, flags, capability) == expected

@@ -84,12 +84,12 @@ class Selection:
     """Observations (by key) and photos (by id) to read in full."""
 
     observation_keys: NDArray[np.uint64]  # sorted
-    photo_ids: pa.Array
+    photo_ids: NDArray[np.int64]  # sorted
 
     @classmethod
     def of(cls, observation_keys: object, photo_ids: object) -> "Selection":
         keys = np.unique(np.asarray(observation_keys, dtype=np.uint64))
-        return cls(keys, pa.array(np.asarray(photo_ids, dtype=np.int64)))
+        return cls(keys, np.unique(np.asarray(photo_ids, dtype=np.int64)))
 
 
 @dataclass(frozen=True)
@@ -188,7 +188,7 @@ def _predicate(name: str, selection: Selection, observations: pa.Table | None) -
     if observations is None:
         raise DumpError(f"{name} comes before observations.csv in the dump")
     if name == "photos.csv":
-        return lambda b: pc.and_(pc.is_in(b["photo_id"], selection.photo_ids), _allowed(b))
+        return lambda b: pc.and_(_id_in(b["photo_id"], selection.photo_ids), _allowed(b))
     key = "taxon_id" if name == "taxa.csv" else "observer_id"
     ids = pc.unique(observations[key].combine_chunks()).drop_null()
     return lambda b: pc.is_in(b[key], ids)
@@ -351,6 +351,18 @@ def _empty_selection() -> pa.Table:
             "extension": pa.array([], pa.string()),
         }
     )
+
+
+def _id_in(ids: pa.Array, sorted_ids: NDArray[np.int64]) -> pa.Array:
+    """Tell which ids are in `sorted_ids`, by binary search.
+
+    `pc.is_in` would build a hash set of all the selected ids (tens of millions) again for
+    each batch of the dump.
+    """
+    values = pc.fill_null(ids, -1).to_numpy(zero_copy_only=False)
+    at = np.minimum(np.searchsorted(sorted_ids, values), max(len(sorted_ids) - 1, 0))
+    found = sorted_ids[at] == values if len(sorted_ids) else np.zeros(len(values), dtype=bool)
+    return pc.and_(pa.array(found), pc.is_valid(ids))
 
 
 def _key_in(uuids: pa.Array, sorted_keys: NDArray[np.uint64]) -> pa.Array:

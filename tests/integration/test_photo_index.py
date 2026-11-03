@@ -4,6 +4,7 @@ import io
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -12,6 +13,7 @@ from inat_landscape.adapters.geo import h3_cells
 from inat_landscape.adapters.inat_dump import (
     DumpError,
     Selection,
+    _id_in,
     index_photos,
     read_dump,
     scan_taxa,
@@ -131,3 +133,14 @@ def test_the_index_keeps_the_extension_of_each_photo():
         zip(selected["photo_id"].to_pylist(), selected["extension"].to_pylist(), strict=True)
     )
     assert rows == [(101, "jpg"), (102, "jpeg"), (103, "jpg"), (107, "png")]
+
+
+@given(
+    st.lists(st.one_of(st.none(), st.integers(-5, 30)), max_size=40),
+    st.lists(st.integers(-5, 30), max_size=20),
+)
+def test_id_lookup_matches_is_in(ids, selected):
+    column = pa.array(ids, pa.int64())
+    expected = pc.fill_null(pc.is_in(column, pa.array(selected, pa.int64())), False)
+    got = _id_in(column, np.unique(np.array(selected, dtype=np.int64)))
+    assert pc.fill_null(got, False).to_pylist() == expected.to_pylist()

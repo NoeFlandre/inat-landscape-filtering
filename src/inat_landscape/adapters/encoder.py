@@ -24,10 +24,17 @@ from inat_landscape.domain.scoring import MODEL_ID
 _RESIZE_THREADS = os.cpu_count() or 4
 
 
-def autocast_dtype(device: str, cpu_flags: str, cuda_bf16: bool) -> torch.dtype | None:
-    """Return the fast float type of the hardware, or None to stay in float32."""
-    if device == "cuda":
-        return torch.bfloat16 if cuda_bf16 else torch.float16
+def autocast_dtype(
+    device: str, cpu_flags: str, capability: tuple[int, int] | None
+) -> torch.dtype | None:
+    """Return the fast float type of the hardware, or None to stay in float32.
+
+    On a GPU, `capability` is its CUDA compute capability. bf16 is fast only where it is
+    native (8.0 and newer): Turing emulates it, about 15 times slower. fp16 is fast from 7.0,
+    and on the P100 (6.0); the GeForce Pascal GPUs (6.1) run fp16 at 1/64 of fp32.
+    """
+    if device == "cuda" and capability is not None:
+        return _gpu_dtype(capability)
     fast_cpu = {"amx_bf16", "avx512_bf16"} & set(cpu_flags.split())
     return torch.bfloat16 if fast_cpu else None
 
@@ -133,10 +140,16 @@ def _resized(image: Image.Image, size: tuple[int, int], resample: int) -> np.nda
     return np.asarray(image.convert("RGB").resize(size, resample=resample), dtype=np.uint8)
 
 
+def _gpu_dtype(capability: tuple[int, int]) -> torch.dtype | None:
+    if capability >= (8, 0):
+        return torch.bfloat16
+    return torch.float16 if capability >= (7, 0) or capability == (6, 0) else None
+
+
 def _hardware_dtype(device: str) -> torch.dtype | None:
     flags = Path("/proc/cpuinfo").read_text() if Path("/proc/cpuinfo").exists() else ""
-    cuda_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
-    return autocast_dtype(device, flags, cuda_bf16)
+    capability = torch.cuda.get_device_capability() if device == "cuda" else None
+    return autocast_dtype(device, flags, capability)
 
 
 def _pooled(output: Any) -> np.ndarray:
