@@ -238,6 +238,12 @@ def _contents(info: CardInfo) -> str:
 
 ![Distribution of {info.score}, with the thresholds](assets/scores.png)
 
+The mosaic shows random CC0 photos of each band of `{info.score}` (240 px, cut square), \
+highest band at the top. The two lowest bands are below the lowest threshold: they show the \
+photos that the thresholds remove.
+
+![Random CC0 photos of each band of {info.score}](assets/examples.jpg)
+
 Score quantiles, over all {info.total:,} photos:
 
 {_quantiles_table(info)}

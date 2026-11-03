@@ -179,3 +179,13 @@ def test_contrast_score_configs(scored):
     assert report.subsets[0].config == "contrast_ge_0_00"
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "`score_contrast` ≥ 0.0, best 100 per cell" in card
+
+
+def test_card_shows_a_mosaic_of_example_photos_per_score_band(scored):
+    workdir, hub, _, _ = scored
+    _publish(workdir, hub, (0.0,))
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    mosaic = workdir / HUB_DIR / "assets" / "examples.jpg"
+    assert mosaic.read_bytes()[:2] == b"\xff\xd8"  # JPEG
+    assert "](assets/examples.jpg)" in card
+    assert "assets/examples.jpg" in set(hub.list_files(""))

@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.patches import FancyBboxPatch, Rectangle
+from PIL import Image
 
 BG = "#fbfbf9"
 INK = "#24343f"
@@ -288,3 +289,33 @@ def _save(fig: plt.Figure, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+
+def examples_mosaic(
+    path: Path, rows: Sequence[tuple[str, Sequence[Image.Image]]], *, per_band: int, label: str
+) -> None:
+    """Draw one row of square photo tiles for each score band, lowest band at the bottom."""
+    tile = 1.25  # inches; with 100 dpi, a tile is 125 px: small, yet the scene shows
+    fig, axes = plt.subplots(
+        len(rows), per_band, figsize=(per_band * tile + 1.4, len(rows) * tile), squeeze=False
+    )
+    for ax_row, (band, images) in zip(axes, reversed(rows), strict=True):
+        for i, ax in enumerate(ax_row):
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            if i < len(images):
+                ax.imshow(_square(images[i]))
+        ax_row[0].set_ylabel(band, rotation=0, ha="right", va="center", fontsize=11, color=INK)
+    fig.suptitle(f"{label}: random CC0 photos of each band", fontsize=12, color=MUTED)
+    fig.subplots_adjust(wspace=0.04, hspace=0.04, left=0.17, right=0.99, bottom=0.01, top=0.93)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=100, pil_kwargs={"quality": 80})
+    plt.close(fig)
+
+
+def _square(image: Image.Image) -> Image.Image:
+    side = min(image.size)
+    left, top = (image.width - side) // 2, (image.height - side) // 2
+    return image.convert("RGB").crop((left, top, left + side, top + side))

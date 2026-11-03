@@ -2,11 +2,13 @@
 
 import shutil
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+from PIL import Image
 
 from inat_landscape.adapters import figures
 from inat_landscape.adapters.embedding_store import EmbeddingStore
@@ -17,10 +19,11 @@ from inat_landscape.adapters.files import (
 )
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
 from inat_landscape.adapters.hub import REPO_ID, Hub, OfflineHub
-from inat_landscape.adapters.images import fetch
+from inat_landscape.adapters.images import decode, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
 from inat_landscape.domain.cells import top_per_cell
+from inat_landscape.domain.examples import band_label, pick_examples, score_bands
 from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS, NEGATIVE_PROMPTS
 from inat_landscape.domain.stats import key_quantiles
 from inat_landscape.domain.thresholds import config_name
@@ -32,6 +35,7 @@ from inat_landscape.pipeline.score import SCORE, SCORED
 
 IMAGE_SIZE = "medium"
 PART = "part-00000.parquet"
+EXAMPLES_PER_BAND = 6  # photos in each row of the card mosaic
 STAGING = Path("publish-parts")  # one image part at a time, deleted after its upload
 
 
@@ -79,6 +83,7 @@ def run_publish(
         Subset(n, t, int(m.sum())) for n, t, m in zip(names, spec.thresholds, masks, strict=True)
     )
     _figures(root / "assets", workdir, table, spec)
+    _examples(root / "assets" / "examples.jpg", table, spec, fetcher)
     info = _card_info(
         workdir,
         table,
@@ -242,6 +247,35 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
         label=spec.score,
         log=spec.score == SCORE,
     )
+
+
+def _examples(path: Path, table: pa.Table, spec: PublishSpec, fetcher: Fetcher) -> None:
+    """Draw a few random CC0 photos (240 px) of each score band, for the card."""
+    bands = score_bands(spec.thresholds)
+    columns = table.select(["photo_id", spec.score, "license"]).to_pydict()
+    picked = pick_examples(*columns.values(), bands=bands, per_band=EXAMPLES_PER_BAND)
+    images = _example_images(table, list(chain.from_iterable(picked)), fetcher)
+    rows = [
+        (band_label(band), _present(chosen, images))
+        for band, chosen in zip(bands, picked, strict=True)
+    ]
+    figures.examples_mosaic(path, rows, per_band=EXAMPLES_PER_BAND, label=spec.score)
+
+
+def _present(ids: list[int], images: dict[int, Image.Image]) -> list[Image.Image]:
+    return [images[i] for i in ids if i in images]
+
+
+def _example_images(table: pa.Table, ids: list[int], fetcher: Fetcher) -> dict[int, Image.Image]:
+    """Download and decode the 240 px photos of `ids`. A photo that fails is left out."""
+    chosen = table.filter(pc.is_in(table["photo_id"], pa.array(ids, pa.int64())))
+    urls = _small_urls(chosen["photo_id"].to_pylist(), chosen["extension"].to_pylist())
+    decoded = {f.photo_id: decode(f.data or b"") for f in fetcher(urls)}
+    return {i: image for i, image in decoded.items() if image is not None}
+
+
+def _small_urls(ids: list[int], extensions: list[str]) -> dict[int, str]:
+    return {i: photo_url(i, SCORING_SIZE, e) for i, e in zip(ids, extensions, strict=True)}
 
 
 def _with_urls(table: pa.Table) -> pa.Table:

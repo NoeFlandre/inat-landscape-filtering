@@ -1,4 +1,6 @@
-"""Card figures: each function writes a PNG."""
+"""Card figures: each function writes a PNG or a JPEG."""
+
+from PIL import Image
 
 from inat_landscape.adapters import figures
 
@@ -48,3 +50,14 @@ def test_score_histogram_linear_with_negative_scores(tmp_path):
 def test_score_histogram_with_one_value(tmp_path):
     figures.score_histogram(tmp_path / "o.png", [0.3, 0.3], [0.3], label="o", log=False)
     assert (tmp_path / "o.png").read_bytes()[:8] == PNG
+
+
+def test_examples_mosaic_is_a_small_jpeg_with_one_row_per_band(tmp_path):
+    red, wide = Image.new("RGB", (240, 180), "red"), Image.new("RGB", (240, 120), "blue")
+    rows = [("< 0.00", [red, wide]), ("0.00 to 0.02", []), ("≥ 0.08", [wide])]
+    path = tmp_path / "examples.jpg"
+    figures.examples_mosaic(path, rows, per_band=3, label="score_contrast")
+    with Image.open(path) as image:
+        assert image.format == "JPEG"
+        assert image.height > image.width / 3  # three rows of square tiles
+    assert path.stat().st_size < 300_000

@@ -71,6 +71,10 @@ WHERE a.score_landscape >= 0.001 AND a.license <> 'CC-BY-NC';
 
 ![Distribution of score_landscape, with the thresholds](assets/scores.png)
 
+The mosaic shows random CC0 photos of each band of `score_landscape` (240 px, cut square), highest band at the top. The two lowest bands are below the lowest threshold: they show the photos that the thresholds remove.
+
+![Random CC0 photos of each band of score_landscape](assets/examples.jpg)
+
 Score quantiles, over all 10 photos:
 
 | p50 | max |
