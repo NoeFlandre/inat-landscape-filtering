@@ -91,7 +91,9 @@ def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _W
     store = open_store(workdir, model_id, hub)
     done = store.done_ids()
     failures = _read_failures(workdir / failures_name(worker))
-    permanent = _permanent(failures) - done
+    # The shared failure file (from `state pull`) also lists the known permanent failures.
+    shared = _read_failures(workdir / FAILURES) if worker[1] > 1 else {}
+    permanent = (_permanent(failures) | _permanent(shared)) - done
     rows = sample.select(["photo_id", "extension"]).to_pylist()
     return _Work(
         sample["photo_id"].to_pylist(),

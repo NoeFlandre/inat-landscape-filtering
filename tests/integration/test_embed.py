@@ -185,3 +185,15 @@ def test_max_photos_stops_the_run_early_with_its_work_saved(setup):
     assert report.embedded == 2
     assert plan_embed(workdir, FakeEncoder.model_id, hub) == 2
     assert _embed(workdir, hub, FakeEncoder()).embedded == 2
+
+
+def test_workers_skip_the_permanent_failures_of_the_shared_failure_file(setup):
+    # Bug: a worker read only its own failure file. On a fresh node it tried the known 404
+    # photos again, so its plan never reached 0 and its job chain never ended.
+    workdir, handler, hub = setup
+    serve_photos(handler, skip=(102,))
+    _embed(workdir, hub, FakeEncoder())  # one worker: 102 goes to the shared failure file
+    (workdir / "failures-0-of-2.parquet").unlink(missing_ok=True)
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 0
+    report = _embed(workdir, hub, FakeEncoder(), worker=(0, 2))
+    assert (report.embedded, report.failed, report.skipped) == (0, 0, 1)

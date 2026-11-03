@@ -1,43 +1,58 @@
 #!/usr/bin/env bash
-# Grid'5000 OAR batch job: embed this worker's share of the sample on one GPU.
+# Grid'5000 OAR batch job: embed the share of one worker slot I/N on one GPU.
 #
-# Submit with scripts/g5k/submit.sh (parallel 1-hour jobs, see docs/grid5000.md).
+# Submit with scripts/g5k/submit.sh (one slot) or scripts/g5k/submit_all.sh (all sites).
 # The job resumes: the embeddings on the hub are the record of done work. While photos are
-# left, each job queues its successor, so one submission runs the work to the end.
-#
-#OAR -n inat-landscape-embed
-#OAR -O inat-embed.%jobid%.out
-#OAR -E inat-embed.%jobid%.err
+# left and the previous job made progress, each job queues the next job of its slot, with
+# the same oarsub options. So one submission runs the slot to the end.
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
-WORKER="${1:-0/1}"  # this worker and the worker count, as I/N
-
-# Storage: /home (25 GB quota) holds only the repository and its environment (about 6 GB).
-# Caches and the work directory go to the node-local /tmp, deleted after the job.
-WORK="/tmp/inat-work-$USER"
-export UV_CACHE_DIR="/tmp/uv-cache-$USER" UV_LINK_MODE=copy HF_HOME="/tmp/hf-$USER"
-export HF_HUB_DISABLE_PROGRESS_BARS=1
-# The token file is created once by the user (chmod 600). It is never in the repository.
+WORKER="${1:?usage: embed.oar I/N}"  # this worker slot and the global worker count
+SLOT="${WORKER/\//-of-}"
+# /home (25 GB quota) keeps only the repository and a small folder for each slot: its oarsub
+# options, its failure file and its last count of photos left.
+KEEP="$HOME/.inat-landscape/$SLOT"
+# Everything else is on the node-local /tmp, deleted after the job: the Python environment,
+# the caches and the work directory. Each slot has its own folder, as jobs can share a node.
+BASE="/tmp/inat-$USER-$SLOT"
+WORK="$BASE/work"
+FAILS="failures-$SLOT.parquet"
+export UV_CACHE_DIR="$BASE/uv-cache" UV_PYTHON_INSTALL_DIR="$BASE/python" UV_LINK_MODE=copy
+export UV_PROJECT_ENVIRONMENT="$BASE/venv" HF_HOME="$BASE/hf" HF_HUB_DISABLE_PROGRESS_BARS=1
+# The token file is made once on each site (mode 600). It is never in the repository.
 HF_TOKEN="$(cat "$HOME/.hf_token")"
 export HF_TOKEN
+export PATH="$BASE/bin:$HOME/.local/bin:$PATH"
+mkdir -p "$KEEP" "$WORK"
 
-export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/0.11.32/install.sh \
+    | env UV_INSTALL_DIR="$BASE/bin" UV_NO_MODIFY_PATH=1 sh
 cd "$REPO_DIR"
-# One environment on the shared /home: parallel jobs take turns to install or check it.
-flock "$HOME/.inat-landscape-uv.lock" sh -c '
-    command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/0.11.32/install.sh | sh
-    uv sync --locked --no-default-groups --group cu126
-'
+uv sync --locked --no-default-groups --group cu126 -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-[ -f "$WORK/sample.parquet" ] || run state pull
+run state pull
+# Keep the failure file of the slot on /home, so the next job does not try the same photos.
+[ -f "$KEEP/$FAILS" ] && cp "$KEEP/$FAILS" "$WORK/$FAILS"
+save_failures() { [ -f "$WORK/$FAILS" ] && cp "$WORK/$FAILS" "$KEEP/$FAILS" || true; }
+trap save_failures EXIT
+
 todo="$(run embed --worker "$WORKER" --plan | sed -n 's/^todo=//p')"
-echo "worker $WORKER: ${todo:-?} photos left"
+last="$(cat "$KEEP/todo" 2>/dev/null || echo)"
+echo "worker $WORKER: ${todo:-?} photos left (previous job: ${last:-none})"
+echo "${todo:-0}" > "$KEEP/todo"
 [ "${todo:-0}" -gt 0 ] || exit 0
-# Queue the next 1-hour job of this worker. It starts after this one ends, and it stops at
+if [ -n "$last" ] && [ "$todo" -ge "$last" ]; then
+    echo "no progress since the previous job: the chain stops" >&2
+    exit 1
+fi
+# Queue the next 1-hour job of this slot. It starts after this one ends, and it stops at
 # once when no photo is left. So the chain ends by itself.
-oarsub -a "$OAR_JOB_ID" -l "host=1/gpu=1,walltime=1:00:00" "$REPO_DIR/scripts/g5k/embed.oar $WORKER" \
-    || echo "could not queue the next job: run scripts/g5k/submit.sh again" >&2
+mapfile -t options < "$KEEP/oarsub.options"
+oarsub -a "$OAR_JOB_ID" -n "inat-embed-$SLOT" "${options[@]}" -l "gpu=1,walltime=1:00:00" \
+    -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err" \
+    "$REPO_DIR/scripts/g5k/embed.oar $WORKER" \
+    || echo "could not queue the next job: run scripts/g5k/submit.sh $WORKER again" >&2
 run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64 --download-batch 2048
