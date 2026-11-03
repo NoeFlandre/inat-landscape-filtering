@@ -2,8 +2,9 @@
 
 The shards are the only record of which photos have an embedding. Before a run, the
 store reads the photo ids of the remote shards, so no photo is embedded twice, even on a new
-machine. A worker slot tags its shards (`part-w1of4-…`) and reads the ids of its own shards
-and of the untagged ones only: this is the work that can overlap with its own.
+machine. A worker slot tags its shards (`part-w1of4-…`). It reads the ids of its own shards,
+of the untagged ones and of the shards of another worker count: the work that can overlap
+with its own. The other slots of its count cannot overlap, so their shards are not read.
 """
 
 import hashlib
@@ -54,8 +55,12 @@ class EmbeddingStore:
         }
 
     def _mine(self, path: str) -> bool:
+        """Tell if a shard can hold photos of this tag: untagged, this tag, or another count."""
         name = path.rsplit("/", 1)[-1]
-        return not self.tag or not name.startswith("part-w") or name.startswith(f"part-{self.tag}-")
+        if not self.tag or not name.startswith("part-w"):
+            return True
+        tag = name.removeprefix("part-").split("-", 1)[0]
+        return tag == self.tag or tag.split("of")[-1] != self.tag.split("of")[-1]
 
     def stream(self) -> Iterator[tuple[list[int], np.ndarray]]:
         """Yield the ids and float16 embeddings of each shard, one shard at a time.

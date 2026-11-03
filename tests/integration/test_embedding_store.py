@@ -88,3 +88,12 @@ def test_stream_yields_each_remote_shard_once_and_keeps_no_copy(tmp_path, hub):
 
 def test_stream_of_an_empty_store_yields_nothing(tmp_path, hub):
     assert list(EmbeddingStore(tmp_path, DIR, hub).stream()) == []
+
+
+def test_a_slot_reads_the_shards_of_another_worker_count(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub, tag="w1of2").add([5], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "b", DIR, hub, tag="w2of4").add([6], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "c", DIR, hub, tag="w1of4").add([7], np.ones((1, 2)))
+    # A new count N can start at any time: the work of the old count is seen, the work of
+    # the other slots of the same count cannot overlap and is not read.
+    assert EmbeddingStore(tmp_path / "d", DIR, hub, tag="w1of4").remote_ids() == {5, 7}
