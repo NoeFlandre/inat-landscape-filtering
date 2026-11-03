@@ -113,3 +113,21 @@ def test_index_with_an_empty_photos_table():
     index = index_photos(_stream(members), PLANT_TAXA, sample_prefix(1.0), res=5, cap=1)
     assert index.selected.num_rows == 0
     assert index.counts.num_rows == 0
+
+
+def test_index_reads_a_plain_tar_like_the_gzipped_one():
+    gz = index_photos(_stream(), PLANT_TAXA, sample_prefix(0.25), res=5, cap=1)
+    plain = index_photos(
+        io.BytesIO(fakes.make_dump(gzip=False)), PLANT_TAXA, sample_prefix(0.25), res=5, cap=1
+    )
+    assert plain.selected.equals(gz.selected)
+    assert plain.counts.equals(gz.counts)
+
+
+def test_the_index_keeps_the_extension_of_each_photo():
+    index = index_photos(_stream(), PLANT_TAXA, sample_prefix(0.25), res=5, cap=10)
+    selected = index.selected
+    rows = sorted(
+        zip(selected["photo_id"].to_pylist(), selected["extension"].to_pylist(), strict=True)
+    )
+    assert rows == [(101, "jpg"), (102, "jpeg"), (103, "jpg"), (107, "png")]

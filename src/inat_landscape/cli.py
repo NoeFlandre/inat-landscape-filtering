@@ -27,7 +27,7 @@ from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
-from inat_landscape.pipeline.sample import run_sample
+from inat_landscape.pipeline.sample import run_sample, run_worklist
 from inat_landscape.pipeline.score import SCORE, run_score
 from inat_landscape.pipeline.state import STATE_FILES, pull_state, push_state
 from inat_landscape.pipeline.status import run_status
@@ -103,6 +103,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     _add_measure(sub)
     _add_ingest(sub)
+    _add_worklist(sub)
     _add_sample(sub)
     _add_embed(sub)
     _add_score(sub)
@@ -130,6 +131,12 @@ def _parser() -> argparse.ArgumentParser:
 def _dump_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--source", default=SNAPSHOT_URL, help="dump URL or local path")
     p.add_argument(
+        "--dump-file",
+        type=Path,
+        default=None,
+        help="read the dump of --source from this local copy (gzipped or a plain tar)",
+    )
+    p.add_argument(
         "--fraction",
         type=float,
         default=1.0,
@@ -149,6 +156,14 @@ def _add_ingest(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("ingest", help="stream the metadata dump and keep the capped candidates")
     _dump_options(p)
     p.set_defaults(handler=_ingest)
+
+
+def _add_worklist(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "worklist", help="write the embed work list from the dump index, before `ingest`"
+    )
+    _dump_options(p)
+    p.set_defaults(handler=_worklist)
 
 
 def _add_measure(sub: argparse._SubParsersAction) -> None:
@@ -262,18 +277,30 @@ def _add_publish(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(handler=_publish)
 
 
+def _opener(args: argparse.Namespace, deps: Deps) -> Callable[[str], BinaryIO]:
+    """Return the dump opener: the local copy of `--dump-file`, else the source itself."""
+    local = args.dump_file
+    return deps.opener if local is None else lambda _source: local.open("rb")
+
+
 def _params(args: argparse.Namespace) -> IngestParams:
     return IngestParams(source=args.source, fraction=args.fraction, res=args.res, cap=args.cap)
 
 
 def _measure(args: argparse.Namespace, deps: Deps) -> None:
-    index = run_index(args.workdir, _params(args), force=args.force, opener=deps.opener)
+    index = run_index(args.workdir, _params(args), force=args.force, opener=_opener(args, deps))
     print(cap_report(index.counts["photos"].to_pylist(), args.caps))
 
 
 def _ingest(args: argparse.Namespace, deps: Deps) -> None:
-    table = run_ingest(args.workdir, _params(args), force=args.force, opener=deps.opener)
+    table = run_ingest(args.workdir, _params(args), force=args.force, opener=_opener(args, deps))
     print(f"candidates={table.num_rows}")
+
+
+def _worklist(args: argparse.Namespace, deps: Deps) -> None:
+    print(
+        f"worklist={run_worklist(args.workdir, _params(args), opener=_opener(args, deps)).num_rows}"
+    )
 
 
 def _sample(args: argparse.Namespace, _deps: Deps) -> None:

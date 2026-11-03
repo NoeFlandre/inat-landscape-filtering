@@ -39,6 +39,7 @@ def _run(deps, tmp_path, *args):
 
 def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "measure", "--fraction", "0.25", "--caps", "1,10") == 0
+    assert _run(deps, tmp_path, "worklist", "--fraction", "0.25") == 0
     assert _run(deps, tmp_path, "ingest", "--fraction", "0.25") == 0
     assert _run(deps, tmp_path, "sample") == 0
     assert (
@@ -56,6 +57,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "status", "--model", FakeEncoder.model_id) == 0
     out = capsys.readouterr().out
     assert "cells=3 photos=4 max_per_cell=2" in out
+    assert "worklist=4" in out
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out
@@ -96,7 +98,17 @@ def test_help_lists_commands():
         check=False,
     )
     assert result.returncode == 0
-    for command in ("measure", "ingest", "sample", "embed", "score", "publish", "state", "status"):
+    for command in (
+        "measure",
+        "ingest",
+        "worklist",
+        "sample",
+        "embed",
+        "score",
+        "publish",
+        "state",
+        "status",
+    ):
         assert command in result.stdout
 
 
@@ -130,3 +142,13 @@ def test_bad_caps_exit_2(deps, tmp_path):
     with pytest.raises(SystemExit) as exc:
         _run(deps, tmp_path, "measure", "--caps", "a,b")
     assert exc.value.code == 2
+
+
+def test_dump_file_reads_a_local_copy_and_keeps_the_source(deps, tmp_path, capsys):
+    local = tmp_path / "dump.tar"
+    local.write_bytes(fakes.make_dump(gzip=False))
+    args = ["--source", "https://example.org/dump.tar.gz", "--dump-file", str(local)]
+    assert _run(deps, tmp_path, "worklist", "--fraction", "0.25", *args) == 0
+    assert "worklist=4" in capsys.readouterr().out
+    index = json.loads((tmp_path / "w" / "ingest" / "index.json").read_text())
+    assert index["source"] == "https://example.org/dump.tar.gz"

@@ -96,7 +96,7 @@ class Selection:
 class PhotoIndex:
     """Eligible photos per H3 cell, and the first `cap` of each cell in sample order."""
 
-    selected: pa.Table  # photo_id, observation_key, position, h3_cell
+    selected: pa.Table  # photo_id, observation_key, position, h3_cell, extension
     counts: pa.Table  # h3_cell, photos (before the cap)
 
 
@@ -104,7 +104,8 @@ def open_source(source: str) -> BinaryIO:
     """Open the dump from an https URL or a local path.
 
     An https download resumes where it stopped (HTTP Range) when the connection breaks: the
-    37 GB stream takes about an hour, and a reset would lose the whole pass.
+    37 GB stream takes about an hour, and a reset would lose the whole pass. A local path can
+    be the gzipped dump or a decompressed plain tar, which reads much faster (no gzip).
     """
     if source.startswith("https://"):
         return cast(BinaryIO, io.BufferedReader(_ResumableHttp(source), 1 << 20))
@@ -160,7 +161,7 @@ def read_dump(stream: BinaryIO, selection: Selection) -> DumpSlice:
 
     Photos are also kept only when their licence is allowed.
     """
-    with tarfile.open(fileobj=stream, mode="r|gz") as tar:
+    with tarfile.open(fileobj=stream, mode="r|*") as tar:
         tables = _read_members(tar, selection)
     missing = sorted(set(_SCHEMAS) - set(tables))
     if missing:
@@ -195,7 +196,7 @@ def _predicate(name: str, selection: Selection, observations: pa.Table | None) -
 
 def scan_taxa(stream: BinaryIO) -> pa.Table:
     """Read only the taxa table of the dump."""
-    with tarfile.open(fileobj=stream, mode="r|gz") as tar:
+    with tarfile.open(fileobj=stream, mode="r|*") as tar:
         for _name, handle in _members(tar, {"taxa.csv"}):
             return _read_filtered(handle, "taxa.csv", lambda b: pc.is_valid(b["taxon_id"]))
     raise DumpError("dump has no taxa.csv")
@@ -217,7 +218,7 @@ def index_photos(
     licence is allowed. Only the observation and photo tables are read.
     """
     cells: _ObservationCells | None = None
-    with tarfile.open(fileobj=stream, mode="r|gz") as tar:
+    with tarfile.open(fileobj=stream, mode="r|*") as tar:
         for name, handle in _members(tar, {"observations.csv", "photos.csv"}):
             if name == "photos.csv":
                 return _photo_index(handle, _require(cells), cap, compact_rows)
@@ -314,6 +315,7 @@ def _matched_photos(batch: pa.RecordBatch, obs: _ObservationCells) -> pa.Table:
             "observation_key": keys[found],
             "position": pc.fill_null(rows["position"], 0).to_numpy(zero_copy_only=False)[found],
             "h3_cell": obs.cells[at[found]],
+            "extension": rows["extension"].filter(pa.array(found)),
         }
     )
 
@@ -346,6 +348,7 @@ def _empty_selection() -> pa.Table:
             "observation_key": pa.array([], pa.uint64()),
             "position": pa.array([], pa.int64()),
             "h3_cell": pa.array([], pa.int64()),
+            "extension": pa.array([], pa.string()),
         }
     )
 

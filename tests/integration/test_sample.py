@@ -6,7 +6,13 @@ import pytest
 
 from inat_landscape.adapters.files import read_table
 from inat_landscape.pipeline.ingest import IngestParams, run_ingest
-from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS, StageError, run_sample
+from inat_landscape.pipeline.sample import (
+    SAMPLE,
+    SAMPLE_IDS,
+    StageError,
+    run_sample,
+    run_worklist,
+)
 from tests import fakes
 
 
@@ -50,3 +56,15 @@ def test_sample_writes_the_ids_and_extensions_for_the_embed_workers(workdir):
     ids = read_table(workdir / SAMPLE_IDS)
     assert ids.column_names == ["photo_id", "extension"]
     assert ids["photo_id"].to_pylist() == table["photo_id"].to_pylist()
+
+
+def test_the_worklist_from_the_index_has_the_order_of_the_sample(tmp_path):
+    params = IngestParams(source="fake", fraction=0.25, res=5, cap=1000)
+    opener = lambda _s: io.BytesIO(fakes.make_dump())  # noqa: E731
+    early = tmp_path / "early"
+    ids = run_worklist(early, params, opener=opener)
+    assert ids.column_names == ["photo_id", "extension"]
+    run_ingest(tmp_path / "late", params, opener=opener)
+    sample = run_sample(tmp_path / "late", None)
+    assert ids["photo_id"].to_pylist() == sample["photo_id"].to_pylist() == [101, 103, 107, 102]
+    assert read_table(early / SAMPLE_IDS).equals(read_table(tmp_path / "late" / SAMPLE_IDS))

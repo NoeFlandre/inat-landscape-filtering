@@ -59,10 +59,14 @@ DEFAULT_MEMBERS = {
 }
 
 
-def make_dump(members: dict[str, list[str]] | None = None) -> bytes:
-    """Build a gzipped tar like the iNaturalist Open Data metadata dump."""
+def make_dump(members: dict[str, list[str]] | None = None, *, gzip: bool = True) -> bytes:
+    """Build a gzipped tar like the iNaturalist Open Data metadata dump (or a plain tar)."""
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    with (
+        tarfile.open(fileobj=buf, mode="w:gz")
+        if gzip
+        else tarfile.open(fileobj=buf, mode="w") as tar
+    ):
         for name, lines in (members or DEFAULT_MEMBERS).items():
             data = ("\n".join(lines) + "\n").encode()
             info = tarfile.TarInfo(f"inaturalist-open-data-20990101/{name}")

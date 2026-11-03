@@ -32,17 +32,38 @@ cd "$REPO_DIR"
 uv sync --locked -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
+# The dump: one 37 GB gzipped tar. One HTTP stream gives about 40 MB/s, and Python gunzip
+# about 60 MB/s, for each of the two passes. So the job downloads it once with parallel
+# ranges, and decompresses it once with pigz into a plain tar on the node /tmp (about 90 GB).
+DUMP="$BASE/dump.tar"
+fetch_dump() {
+    local url size parts=32 chunk
+    url="$(uv run --no-sync python -c 'from inat_landscape.adapters.inat_dump import SNAPSHOT_URL as u; print(u)')"
+    size="$(curl -sfI "$url" | tr -d '\r' | awk 'tolower($1) == "content-length:" {print $2}')"
+    chunk=$(( (size + parts - 1) / parts ))
+    seq 0 $((parts - 1)) | xargs -P 16 -I{} sh -c \
+        "curl -sf --retry 20 --retry-delay 5 -r \$(({} * $chunk))-\$(({} * $chunk + $chunk - 1)) '$url' -o '$BASE/part.{}'"
+    [ "$(stat -c %s "$BASE"/part.* | paste -sd+ | bc)" -eq "$size" ] \
+        || { echo "dump download is incomplete" >&2; exit 1; }
+    for i in $(seq 0 $((parts - 1))); do cat "$BASE/part.$i"; rm "$BASE/part.$i"; done | pigz -dc > "$DUMP"
+    echo "$url" > "$BASE/source"
+}
+dump() { echo --source "$(cat "$BASE/source")" --dump-file "$DUMP"; }
+
 if [ "$CAP" = sample ]; then
     # Only the sample again, from the candidates of the state (for example with a new order).
     run state pull --only ingest/manifest.json,ingest/candidates.parquet,failures.parquet
 else
-    # Keep only the failure file of the earlier runs: old candidates can have another scope.
     # The failure file and the dump index of an earlier try, if any (the index records its
     # parameters and its taxa scope, so a stale index is not used).
     run state pull --only failures.parquet,ingest/taxa.parquet,ingest/taxa.json,ingest/index.json,ingest/selected.parquet,ingest/cell_counts.parquet || true
-    run measure --cap "$CAP" --caps "10,50,100,300,1000"
-    run state push  # the index (about 700 MB): a retry starts at the details pass
-    run ingest --cap "$CAP"
+    fetch_dump
+    run measure --cap "$CAP" --caps "10,50,100,300,1000" $(dump)
+    # The embed work list, from the index: the GPU jobs can start now, before the details pass.
+    run worklist --cap "$CAP" $(dump)
+    run state push
+    run ingest --cap "$CAP" $(dump)
+    rm -f "$DUMP"
 fi
 run sample
 run status

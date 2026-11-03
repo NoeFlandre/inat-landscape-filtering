@@ -120,3 +120,8 @@ def test_open_source_gives_up_after_many_resets_without_progress(monkeypatch):
     monkeypatch.setattr("inat_landscape.adapters.inat_dump._RETRY_WAIT", 0.0)
     with pytest.raises(ConnectionResetError), open_source("https://example.org/d") as stream:
         stream.read(10)
+
+
+def test_read_dump_reads_a_plain_tar():
+    plain = read_dump(io.BytesIO(fakes.make_dump(gzip=False)), ALL)
+    assert sorted(plain.photos["photo_id"].to_pylist()) == [101, 102, 103, 107]
