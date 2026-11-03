@@ -50,9 +50,11 @@ if [ -n "$last" ] && [ "$todo" -ge "$last" ]; then
 fi
 # Queue the next 1-hour job of this slot. It starts after this one ends, and it stops at
 # once when no photo is left. So the chain ends by itself.
+# The nodes have no OAR commands: the job submits through the frontend of its site.
 mapfile -t options < "$KEEP/oarsub.options"
-oarsub -a "$OAR_JOB_ID" -n "inat-embed-$SLOT" "${options[@]}" -l "gpu=1,walltime=1:00:00" \
-    -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err" \
-    "$REPO_DIR/scripts/g5k/embed.oar $WORKER" \
+next=(oarsub -a "$OAR_JOB_ID" -n "inat-embed-$SLOT" "${options[@]}" -l "gpu=1,walltime=1:00:00"
+    -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err"
+    "$REPO_DIR/scripts/g5k/embed.oar $WORKER")
+ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "frontend.$(hostname -d)" "${next[*]@Q}" \
     || echo "could not queue the next job: run scripts/g5k/submit.sh $WORKER again" >&2
 run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64 --download-batch 2048

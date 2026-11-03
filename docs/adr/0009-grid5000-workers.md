@@ -28,3 +28,11 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - On the 4-core CPU of the work machine: 5.6 photos per second before, about 16 after. The embeddings stay within a cosine of 0.997 (median 0.9999) of the fp32 embeddings, which is the noise of the float16 storage.
 - `torch.compile` freezes the weights (`torch._inductor.config.freezing`): the weights are folded into the graph and laid out for AMX. Measured on 1,024 real photos: 15.4 → 25.2 photos per second, with the same distance to the fp32 embeddings as before (min cosine 0.9989, median 0.9999). Batch 128 (21.2) and `max-autotune` (21.5) were slower and are not used.
 - On a CPU, several single-thread workers beat one multi-thread worker: on 4 cores and 4,096 real photos, 1 × 4 threads gave 15.8 photos per second, 2 × 2 gave 17.4, and 4 × 1 gave 21.5 (load and compile included). The Python steps of one worker then overlap with the model of the others. Each worker reads only two columns of the sample and keeps its own failure file, and `score` works in chunks of 100,000 embeddings, so 4 workers and the hourly refresh fit in 15 GB of memory.
+
+## Multi-site run (2026-11-03)
+
+- `scripts/g5k/free_gpus.py` reads the OAR resources of each site and finds the free GPUs that the cu126 PyTorch build can use. `scripts/g5k/submit_all.sh` gives each free GPU one slot `I/N`, with one global N, and submits one job chain for each slot on the site of its GPU. A slot has one chain only, and the script stops if chains of an earlier run are still queued or running.
+- Each chain keeps the oarsub options of its cluster (queue, job type, cluster). Some production clusters admit the user only in the besteffort queue: there, the chain uses besteffort jobs.
+- A chain stops when no photo is left, or when a job made no progress.
+- Most `/home` directories had less than 2 GB free. Thus the Python environment is on the node `/tmp`, in one folder for each slot (jobs can share a node). Each job installs it again. `/home` keeps only small slot files (`~/.inat-landscape/`).
+- The workers also skip the permanent failures of the shared `failures.parquet`. Before, a worker on a new node tried the known 404 photos again, so its count of photos left never became 0.
