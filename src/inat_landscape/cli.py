@@ -228,6 +228,12 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         "--concurrency", type=int, default=32, help="parallel photo downloads (default: 32)"
     )
     p.add_argument(
+        "--fetch-processes",
+        type=int,
+        default=1,
+        help="download processes, each with --concurrency downloads (default: 1)",
+    )
+    p.add_argument(
         "--plan", action="store_true", help="only print the photos left for this worker (todo=N)"
     )
     p.add_argument(
@@ -322,7 +328,7 @@ def _embed(args: argparse.Namespace, deps: Deps) -> None:
 
 def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
     def fetcher(urls: Mapping[int, str]) -> list[Fetched]:
-        return deps.fetcher(urls, concurrency=args.concurrency)
+        return deps.fetcher(urls, concurrency=args.concurrency, processes=args.fetch_processes)
 
     report = run_embed(
         args.workdir,

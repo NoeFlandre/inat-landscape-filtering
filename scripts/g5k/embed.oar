@@ -68,8 +68,11 @@ fi
 # Shards of 200,000 photos (about 300 MB, 10 to 20 minutes of work): few commits on the hub.
 # Stop 6 minutes before the walltime, after a batch, so the last shard is saved.
 left=$((START + 3600 - 360 - $(date +%s)))
-run embed --worker "$WORKER" --chunk 200000 --batch-size 256 --concurrency 128 --download-batch 4096 \
-    --max-seconds "$left" "${compile[@]}"
+# One process downloads about 70 photos per second: use the cores of the job (2 for the
+# model and the decode threads).
+procs=$(( $(nproc) - 2 )); [ "$procs" -ge 1 ] || procs=1; [ "$procs" -le 12 ] || procs=12
+run embed --worker "$WORKER" --chunk 200000 --batch-size 256 --concurrency 64 --download-batch 4096 \
+    --fetch-processes "$procs" --max-seconds "$left" "${compile[@]}"
 save_failures
 # The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
 if [ "${WORKER#*/}" = 1 ]; then

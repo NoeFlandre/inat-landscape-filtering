@@ -52,3 +52,17 @@ def test_decode_gives_rgb_image():
 
 def test_decode_returns_none_for_corrupt_bytes():
     assert decode(b"not an image") is None
+
+
+def test_fetch_in_several_processes_gives_the_same_results_in_order(server):
+    _, handler, base = server
+    for i in range(10):
+        handler.routes[f"/{i}.jpg"] = bytes([i]) * 5
+    urls = {i: f"{base}/{i}.jpg" for i in range(10)}
+    urls[99] = f"{base}/missing.jpg"
+    one = fetch(urls, backoff=0.0)
+    many = fetch(urls, backoff=0.0, processes=3)
+    assert [(r.photo_id, r.data, r.status) for r in many] == [
+        (r.photo_id, r.data, r.status) for r in one
+    ]
+    assert [r.photo_id for r in many] == list(urls)
