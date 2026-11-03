@@ -155,3 +155,16 @@ def test_card_acknowledges_grid5000():
     section = card.split("## Acknowledgements\n", 1)[1]
     assert "Grid'5000 testbed" in section
     assert "https://www.grid5000.fr" in section
+
+
+def test_card_states_the_layer_cap_while_the_dataset_grows():
+    info = _info()
+    card = render_card(replace(info, layer_cap=50, embed_cap=1000, total=info.candidates - 1))
+    assert "each H3 cell has its first 50 photos" in card
+    assert "on the way to 1,000 per cell" in card
+
+
+def test_card_with_all_layers_does_not_talk_of_layers():
+    info = _info()
+    card = render_card(replace(info, layer_cap=3, embed_cap=1000, total=info.candidates))
+    assert "grows by layers" not in card

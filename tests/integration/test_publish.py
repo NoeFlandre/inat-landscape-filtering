@@ -6,10 +6,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.images import fetch
 from inat_landscape.domain.card import fields
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
-from inat_landscape.pipeline.embed import HUB_DIR, run_embed
+from inat_landscape.pipeline.embed import HUB_DIR, EmbedOptions, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.score import run_score
@@ -30,6 +31,22 @@ def scored(tmp_path, server, monkeypatch):
     table = run_score(tmp_path / "w", FakeEncoder(), hub)
     scores = sorted(table["score_landscape"].to_pylist())
     return tmp_path / "w", hub, handler, scores
+
+
+def _partly_scored(tmp_path, server, monkeypatch, max_photos):
+    _, handler, base = server
+    url = base + "/photos/{photo_id}/{size}.{extension}"
+    monkeypatch.setattr("inat_landscape.pipeline.embed.PHOTO_URL", url)
+    serve_photos(handler)
+    prepared(tmp_path / "w")
+    (tmp_path / "remote").mkdir()
+    hub = FakeHub(tmp_path / "remote")
+    options = EmbedOptions(max_photos=max_photos)
+    run_embed(
+        tmp_path / "w", FakeEncoder(), hub, fetcher=lambda u: fetch(u, backoff=0.0), options=options
+    )
+    run_score(tmp_path / "w", FakeEncoder(), hub)
+    return tmp_path / "w", hub
 
 
 def _publish(workdir, hub, thresholds, score="score_landscape", cap=100, **kw):
@@ -187,3 +204,20 @@ def test_card_shows_a_mosaic_of_example_photos_per_score_band(scored):
     assert mosaic.read_bytes()[:2] == b"\xff\xd8"  # JPEG
     assert "](assets/examples.jpg)" in card
     assert "assets/examples.jpg" in set(hub.list_files(""))
+
+
+def test_publish_keeps_only_the_complete_layers_while_the_run_goes_on(
+    tmp_path, server, monkeypatch
+):
+    workdir, hub = _partly_scored(tmp_path, server, monkeypatch, max_photos=3)
+    _publish(workdir, hub, (0.0,))
+    published = read_table(workdir / HUB_DIR / "data" / "all" / "part-00000.parquet")
+    assert sorted(published["photo_id"].to_pylist()) == [101, 103, 107]  # layer 0; 102 is next
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    assert "each H3 cell has its first 1 photos" in card
+
+
+def test_publish_with_no_complete_layer_is_an_error(tmp_path, server, monkeypatch):
+    workdir, hub = _partly_scored(tmp_path, server, monkeypatch, max_photos=2)
+    with pytest.raises(StageError, match="no complete layer"):
+        _publish(workdir, hub, (0.0,))

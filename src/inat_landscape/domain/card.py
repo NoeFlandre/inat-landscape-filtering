@@ -69,6 +69,7 @@ class CardInfo:
     embed_cap: int
     h3_res: int
     with_images: bool = True  # False while the run goes on: the images are added at the end
+    layer_cap: int | None = None  # complete layers of the uniform order (ADR 0011), if any
 
 
 def fields(n_prompts: int) -> tuple[Field, ...]:
@@ -391,6 +392,12 @@ the organism was, not the area in view.
 
 
 def _progress(info: CardInfo) -> str:
+    if info.layer_cap is not None and info.total < info.candidates:
+        return (
+            f"The dataset grows by layers: each H3 cell has its first {info.layer_cap:,} photos "
+            f"in a random order (or all its photos, if it has fewer), on the way to "
+            f"{info.embed_cap:,} per cell. Each new version adds the next layers."
+        )
     if info.total < info.candidates:
         return (
             f"The run is in progress: {info.total:,} of the {info.candidates:,} sample "

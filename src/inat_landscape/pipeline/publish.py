@@ -1,7 +1,7 @@
 """Publish stage: build the dataset configs and the card, and upload them."""
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from pathlib import Path
 
@@ -23,10 +23,17 @@ from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
 from inat_landscape.domain.cells import top_per_cell
 from inat_landscape.domain.examples import band_label, pick_examples, score_bands
+from inat_landscape.domain.layers import complete_cap
 from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS, NEGATIVE_PROMPTS
 from inat_landscape.domain.stats import key_quantiles
 from inat_landscape.domain.thresholds import config_name
-from inat_landscape.pipeline.embed import HUB_DIR, SCORING_SIZE, embedding_dir, photo_url
+from inat_landscape.pipeline.embed import (
+    HUB_DIR,
+    SCORING_SIZE,
+    embedding_dir,
+    photo_url,
+    read_sample,
+)
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES, MANIFEST
 from inat_landscape.pipeline.ports import Fetcher
@@ -34,6 +41,7 @@ from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
 IMAGE_SIZE = "medium"
 PART = "part-00000.parquet"
+LAYER_TOLERANCE = 0.002  # share of failed downloads that a complete layer can miss
 EXAMPLES_PER_BAND = 6  # photos in each row of the card mosaic
 STAGING = Path("publish-parts")  # one image part at a time, deleted after its upload
 
@@ -72,7 +80,7 @@ def run_publish(
     With `spec.images`, the threshold configs carry the 500 px image and are uploaded part by
     part (bounded disk); otherwise they hold the metadata only (quick refresh during a run).
     """
-    table = _write_all(workdir)
+    table, layer_cap = _write_all(workdir)
     root = workdir / HUB_DIR
     kept = [_kept_mask(table, spec, t) for t in spec.thresholds]
     names = [config_name(t, spec.score) for t in spec.thresholds]
@@ -91,7 +99,7 @@ def run_publish(
         model_id=model_id,
         repo_id=repo_id,
     )
-    (root / "README.md").write_text(render_card(info))
+    (root / "README.md").write_text(render_card(replace(info, layer_cap=layer_cap)))
     hub.upload_folder(
         root,
         f"Publish {table.num_rows} scored photos",
@@ -101,16 +109,33 @@ def run_publish(
     return PublishReport(table.num_rows, subsets, int((kept[0] & ~has_image).sum()))
 
 
-def _write_all(workdir: Path) -> pa.Table:
-    """Clear the local configs and figures, and write `all` (every scored photo, with URLs)."""
+def _write_all(workdir: Path) -> tuple[pa.Table, int | None]:
+    """Clear the local configs and figures, and write `all` (the published photos, with URLs).
+
+    With a uniform sample (ADR 0011), only the complete layers are published: the photos of
+    rank below the cap that every cell has reached. Return the table and that cap.
+    """
     if not (workdir / SCORED).exists():
         raise StageError(f"no scores at {workdir / SCORED}: run `score` first")
-    table = _with_urls(read_table(workdir / SCORED))
+    table, layer_cap = _complete_layers(workdir, read_table(workdir / SCORED))
+    table = _with_urls(table)
     root = workdir / HUB_DIR
     for folder in ("data", "assets"):
         shutil.rmtree(root / folder, ignore_errors=True)
     write_table(with_hf_features(table), root / "data" / "all" / PART)
-    return table
+    return table, layer_cap
+
+
+def _complete_layers(workdir: Path, scored: pa.Table) -> tuple[pa.Table, int | None]:
+    sample = read_sample(workdir)
+    if "cell_rank" not in sample.column_names:
+        return scored, None  # a sample of before ADR 0011: every scored photo is published
+    ranks = sample["cell_rank"].to_numpy()
+    done = pc.is_in(sample["photo_id"], scored["photo_id"]).to_numpy(zero_copy_only=False)
+    cap = complete_cap(ranks, done, LAYER_TOLERANCE)
+    if cap == 0:
+        raise StageError("no complete layer yet: every cell needs its first photo")
+    return scored.filter(pc.less(scored["cell_rank"], cap)), cap
 
 
 Configs = tuple[list[str], list[np.ndarray]]  # config names, and the rows each one keeps
