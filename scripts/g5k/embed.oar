@@ -10,12 +10,18 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
 WORKER="${1:?usage: embed.oar I/N}"  # this worker slot and the global worker count
 SLOT="${WORKER/\//-of-}"
+BASE="/tmp/inat-$USER-$SLOT"
+# Bash reads a script while it runs it. A `git pull` on the NFS /home replaces this file and
+# stops the job ("Stale file handle"). So the job runs a copy on the node /tmp.
+if [ "$0" != "$BASE/embed.oar" ]; then
+    mkdir -p "$BASE" && cp "$0" "$BASE/embed.oar"
+    exec bash "$BASE/embed.oar" "$@"
+fi
 # /home (25 GB quota) keeps only the repository and a small folder for each slot: its oarsub
 # options, its failure file and its last count of photos left.
 KEEP="$HOME/.inat-landscape/$SLOT"
 # Everything else is on the node-local /tmp, deleted after the job: the Python environment,
 # the caches and the work directory. Each slot has its own folder, as jobs can share a node.
-BASE="/tmp/inat-$USER-$SLOT"
 WORK="$BASE/work"
 FAILS="failures-$SLOT.parquet"
 export UV_CACHE_DIR="$BASE/uv-cache" UV_PYTHON_INSTALL_DIR="$BASE/python" UV_LINK_MODE=copy
