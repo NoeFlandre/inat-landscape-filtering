@@ -65,14 +65,10 @@ def test_gpus_that_the_cuda_build_cannot_use_are_left_out():
         "AGX Xavier",
         "GH200 480GB",
         "RTX PRO 6000 Blackwell Server Edition",
-        "GeForce GTX 1080 Ti",
-        "Tesla P100-PCIE-16GB",
-        "Quadro P6000",
-        "TITAN X (Pascal)",
-        "TITAN Xp",
     ]:
         assert not free_gpus.usable(model), model
-    for model in ["A100-SXM4-40GB", "Tesla T4", "TITAN RTX", "L40S", "H100 NVL", "Tesla V100"]:
+    usable = ["A100-SXM4-40GB", "Tesla T4", "TITAN RTX", "L40S", "H100 NVL", "Tesla V100"]
+    for model in [*usable, "GeForce GTX 1080 Ti", "Tesla P100-PCIE-16GB", "TITAN X (Pascal)"]:
         assert free_gpus.usable(model), model
 
 

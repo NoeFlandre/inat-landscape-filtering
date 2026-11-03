@@ -42,7 +42,11 @@ cd "$REPO_DIR"
 uv sync --locked --no-default-groups --group cu126 -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv,noheader
+# torch.compile (Triton) needs compute capability 7.0 or more: Pascal GPUs run without it.
+compile=()
+cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)"
+[ "${cap%%.*}" -ge 7 ] || compile=(--no-compile)
 run state pull --only sample-ids.parquet,failures.parquet  # about 1 GB, not the full sample
 # Keep the failure file of the slot on /home, so the next job does not try the same photos.
 [ -f "$KEEP/$FAILS" ] && cp "$KEEP/$FAILS" "$WORK/$FAILS"
@@ -65,7 +69,7 @@ fi
 # Stop 6 minutes before the walltime, after a batch, so the last shard is saved.
 left=$((START + 3600 - 360 - $(date +%s)))
 run embed --worker "$WORKER" --chunk 200000 --batch-size 256 --concurrency 128 --download-batch 4096 \
-    --max-seconds "$left"
+    --max-seconds "$left" "${compile[@]}"
 save_failures
 # The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
 if [ "${WORKER#*/}" = 1 ]; then

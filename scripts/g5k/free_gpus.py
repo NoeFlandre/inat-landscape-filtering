@@ -12,9 +12,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# The cu126 PyTorch build runs on NVIDIA x86 GPUs from Volta (7.0) to Hopper (9.0).
-# These words mark AMD GPUs, ARM boards, Pascal or older GPUs, and Blackwell GPUs.
-_UNUSABLE = ("Radeon", "Instinct", "AGX", "GH200", "Blackwell", "GTX", "P100", "P6000", "TITAN X")
+# The cu126 PyTorch build runs on NVIDIA x86 GPUs from Maxwell (sm_50) to Hopper (sm_90).
+# These words mark AMD GPUs, ARM boards and Blackwell GPUs (sm_120).
+_UNUSABLE = ("Radeon", "Instinct", "AGX", "GH200", "Blackwell")
 
 
 def usable(model: str) -> bool:
