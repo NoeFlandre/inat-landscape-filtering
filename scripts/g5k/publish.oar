@@ -7,10 +7,11 @@
 # refresh: during the embedding run, publish the metadata, figures and card (no images) every
 #          20 minutes, until the walltime is nearly over.
 # final:   publish once with the 500 px images (uploaded in parts of 2,000, ADR 0010).
+# once:    publish once without images (the configs give the image URLs).
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
-MODE="${1:?usage: publish.oar refresh|final [CAP_PER_CELL]}"
+MODE="${1:?usage: publish.oar refresh|final|once [CAP_PER_CELL]}"
 CAP_PER_CELL="${2:-1000}"  # photos per H3 cell in each threshold config
 BASE="/tmp/inat-$USER-publish"
 # A copy on the node /tmp: a `git pull` on the NFS /home does not stop the job.
@@ -39,6 +40,10 @@ publish() {  # $1: --images or --no-images
 }
 if [ "$MODE" = final ]; then
     publish --images
+    exit 0
+fi
+if [ "$MODE" = once ]; then
+    publish --no-images
     exit 0
 fi
 end=$(($(date +%s) + 45 * 60))
