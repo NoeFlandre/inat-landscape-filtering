@@ -1,7 +1,9 @@
 """Deterministic fakes and fixture builders shared by tests."""
 
 import io
+import shutil
 import tarfile
+from fnmatch import fnmatch
 from pathlib import Path
 
 import numpy as np
@@ -95,11 +97,20 @@ class FakeHub:
         dest.write_bytes(local.read_bytes())
         self.uploads.append(path)
 
+    def delete_folder(self, path: str, message: str) -> None:
+        shutil.rmtree(self.remote / path, ignore_errors=True)
+
     def upload_folder(self, root, message, allow, delete) -> None:
+        """Like the Hub: remote files matching `delete` go, then local files matching `allow`
+        are uploaded (fnmatch patterns: `*` also matches `/`)."""
         self.folder_uploads.append((list(allow), list(delete)))
+        for name in self.list_files(""):
+            if any(fnmatch(name, d) for d in delete):
+                (self.remote / name).unlink()
         for p in root.rglob("*"):
-            if p.is_file() and any(p.relative_to(root).match(a) for a in allow):
-                self.upload_file(p, str(p.relative_to(root)), message)
+            name = str(p.relative_to(root))
+            if p.is_file() and any(fnmatch(name, a) for a in allow):
+                self.upload_file(p, name, message)
 
 
 class FakeEncoder:

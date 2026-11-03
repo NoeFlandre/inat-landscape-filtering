@@ -16,8 +16,8 @@ Each item tells why it exists and how to remove it.
 ## The details pass and publish keep their tables in memory
 
 - **Why:** this is simple, and it is correct up to a few million photos.
-- **Effect:** with tens of millions of capped photos, the details join and the medium images in `publish` can exceed the memory.
-- **Cleanup:** write the details and the configs in parts, and stream the images.
+- **Effect:** with tens of millions of capped photos, the details join and the `all` config in `publish` can exceed the memory. The images are already in parts (ADR 0010).
+- **Cleanup:** write the details and the `all` config in parts.
 
 ## Photos decode on the CPU
 

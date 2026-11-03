@@ -68,6 +68,7 @@ class CardInfo:
     cap_per_cell: int
     embed_cap: int
     h3_res: int
+    with_images: bool = True  # False while the run goes on: the images are added at the end
 
 
 def fields(n_prompts: int) -> tuple[Field, ...]:
@@ -192,7 +193,7 @@ that tells if the photo shows a landscape.**
 **{low.rows:,} photos reach the lowest threshold ({low.threshold} on `{info.score}`, at most \
 {info.cap_per_cell} per H3 cell) and come with their 500 px image. All {info.total:,} come \
 with a {info.embedding_dim}-dimension \
-[`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**
+[`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**{_images_note(info)}
 
 The photos come from the [iNaturalist Open Data]\
 (https://github.com/inaturalist/inaturalist-open-data) snapshot of \
@@ -244,6 +245,10 @@ Score quantiles, over all {info.total:,} photos:
 
 {_breakdown_table("Licence", info.licenses, info.subsets)}
 """
+
+
+def _images_note(info: CardInfo) -> str:
+    return "" if info.with_images else "\n\nThe 500 px images are added at the end of the run."
 
 
 def _configs_table(info: CardInfo) -> str:

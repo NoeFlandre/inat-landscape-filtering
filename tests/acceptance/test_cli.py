@@ -49,6 +49,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--score", "score_contrast") == 0
+    assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--no-images") == 0
     assert _run(deps, tmp_path, "state", "push") == 0
     assert main(["--workdir", str(tmp_path / "w2"), "state", "pull"], deps) == 0
     assert (tmp_path / "w2" / "scored.parquet").exists()
@@ -58,6 +59,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out
+    assert "images=no" in out
     assert "score_contrast: " in out
     assert "score_ge_0_00=3" in out
     assert "contrast_ge_0_00=" in out

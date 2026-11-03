@@ -142,3 +142,9 @@ def test_progress_line():
     )
     done = replace(_info(), candidates=10)
     assert "All 10 sample photos are scored." in render_card(done)
+
+
+def test_card_says_when_images_come_later():
+    assert "The 500 px images are added at the end of the run." not in render_card(_info())
+    card = render_card(replace(_info(), with_images=False))
+    assert "embedding.**\n\nThe 500 px images are added at the end of the run.\n\n" in card

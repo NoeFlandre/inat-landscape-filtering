@@ -240,6 +240,13 @@ def _add_publish(sub: argparse._SubParsersAction) -> None:
         default=100,
         help="best-scored photos kept per H3 cell in each config (default: 100)",
     )
+    p.add_argument(
+        "--images",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="put the 500 px image in the threshold configs, uploaded in parts "
+        "(--no-images: metadata only, a quick refresh during a run)",
+    )
     p.set_defaults(handler=_publish)
 
 
@@ -293,7 +300,9 @@ def _score(args: argparse.Namespace, deps: Deps) -> None:
 
 
 def _publish(args: argparse.Namespace, deps: Deps) -> None:
-    spec = PublishSpec(args.thresholds, score=args.score, cap_per_cell=args.cap_per_cell)
+    spec = PublishSpec(
+        args.thresholds, score=args.score, cap_per_cell=args.cap_per_cell, images=args.images
+    )
     report = run_publish(
         args.workdir,
         spec,
@@ -301,7 +310,8 @@ def _publish(args: argparse.Namespace, deps: Deps) -> None:
         model_id=args.model,
         fetcher=deps.fetcher,
     )
-    print(f"all={report.total} images_failed={report.images_failed}")
+    images = "yes" if args.images else "no"
+    print(f"all={report.total} images={images} images_failed={report.images_failed}")
     print(" ".join(f"{s.config}={s.rows}" for s in report.subsets))
 
 

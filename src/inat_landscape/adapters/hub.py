@@ -1,11 +1,12 @@
 """Hugging Face dataset repository access, and an offline stand-in."""
 
+import contextlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
 from huggingface_hub import HfApi
-from huggingface_hub.errors import RepositoryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 REPO_ID = "NoeFlandre/inat-landscape-filtering"
 STATE_REPO_ID = "NoeFlandre/inat-landscape-filtering-state"
@@ -20,6 +21,7 @@ class Hub(Protocol):
     def upload_folder(
         self, root: Path, message: str, allow: Sequence[str], delete: Sequence[str]
     ) -> None: ...
+    def delete_folder(self, path: str, message: str) -> None: ...
 
 
 class HfHub:
@@ -68,6 +70,16 @@ class HfHub:
             delete_patterns=list(delete),
         )
 
+    def delete_folder(self, path: str, message: str) -> None:
+        """Delete a remote folder; a missing folder is not an error."""
+        with contextlib.suppress(EntryNotFoundError):
+            self.api.delete_folder(
+                path_in_repo=path,
+                repo_id=self.repo_id,
+                repo_type="dataset",
+                commit_message=message,
+            )
+
     def _ensure_repo(self) -> None:
         if not self._created:
             self.api.create_repo(
@@ -91,4 +103,7 @@ class OfflineHub:
     def upload_folder(
         self, root: Path, message: str, allow: Sequence[str], delete: Sequence[str]
     ) -> None:
+        pass
+
+    def delete_folder(self, path: str, message: str) -> None:
         pass

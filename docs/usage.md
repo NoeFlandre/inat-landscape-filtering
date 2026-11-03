@@ -45,7 +45,7 @@ Use `uv run inat-landscape COMMAND --help` to see all options.
 - `embed` reads the embedding shards on the Hugging Face repository first. It does not embed a photo that has an embedding.
 - `embed` uploads local shards that are not on the Hugging Face repository. Thus shards from an `--offline` run go to the repository at the next online run.
 - `embed` records failed downloads in `failures.parquet`. It does not try a photo with a permanent failure (for example HTTP 404) again. It tries a photo with a temporary failure again.
-- `publish` keeps the downloaded 500 px photos in `cache/medium`.
+- `publish` downloads the 500 px photos in parts of 2,000 and uploads each part. It keeps no photo on the disk. `publish --no-images` writes the metadata only. Use it for a quick refresh during a run.
 
 ## Work directory
 
@@ -58,6 +58,6 @@ work/
   sample.parquet              the first N candidates
   failures.parquet            failed downloads
   scored.parquet              sample photos with scores
-  cache/medium/               500 px photos
+  publish-parts/              the image part that is uploading
   hub/                        local copy of the Hugging Face dataset
 ```

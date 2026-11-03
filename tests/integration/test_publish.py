@@ -2,6 +2,7 @@
 
 import json
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -31,11 +32,17 @@ def scored(tmp_path, server, monkeypatch):
     return tmp_path / "w", hub, handler, scores
 
 
-def _publish(workdir, hub, thresholds, score="score_landscape", cap=100):
-    spec = PublishSpec(tuple(thresholds), score=score, cap_per_cell=cap)
+def _publish(workdir, hub, thresholds, score="score_landscape", cap=100, **kw):
+    spec = PublishSpec(tuple(thresholds), score=score, cap_per_cell=cap, **kw)
     return run_publish(
         workdir, spec, hub, model_id=FakeEncoder.model_id, fetcher=lambda u: fetch(u, backoff=0.0)
     )
+
+
+def _remote(hub, config):
+    """Read a config from the fake hub: all its part files, in order."""
+    parts = sorted((hub.remote / "data" / config).glob("part-*.parquet"))
+    return pa.concat_tables([pq.read_table(p) for p in parts]) if parts else None
 
 
 def test_writes_all_config_with_urls_and_no_images(scored):
@@ -49,23 +56,45 @@ def test_writes_all_config_with_urls_and_no_images(scored):
     assert row["url_small"].endswith("/photos/101/small.jpg")
 
 
-def test_threshold_configs_are_nested_and_carry_images(scored):
+def test_image_configs_are_nested_carry_images_and_leave_no_local_parts(scored):
     workdir, hub, _, scores = scored
     low, high = scores[1], scores[3]
     report = _publish(workdir, hub, (low, high))
     assert [s.rows for s in report.subsets] == [3, 1]
-    path = workdir / HUB_DIR / f"data/{report.subsets[1].config}/part-00000.parquet"
-    table = pq.read_table(path)
+    table = _remote(hub, report.subsets[1].config)
     image = table["image"].to_pylist()[0]
     assert image["bytes"][:2] == b"\xff\xd8"
-    assert (
-        image["path"].endswith(".jpg")
-        or image["path"].endswith(".jpeg")
-        or image["path"].endswith(".png")
-    )
+    assert image["path"].rsplit(".", 1)[-1] in {"jpg", "jpeg", "png"}
     features = json.loads(table.schema.metadata[b"huggingface"])["info"]["features"]
     assert features["image"] == {"_type": "Image"}
     assert features["latitude"] == {"dtype": "float64", "_type": "Value"}
+    assert not list((workdir / HUB_DIR / "data").glob("score_ge_*/*.parquet"))
+
+
+def test_image_parts_are_uploaded_one_commit_each(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0, 0.5), part_rows=1)
+    assert [
+        len(list((hub.remote / "data" / s.config).glob("*.parquet"))) for s in report.subsets
+    ] == [4, 4]
+    # 4 part commits (each with both configs), then the card, `all` and figures
+    assert len(hub.folder_uploads) == 5
+    assert hub.folder_uploads[-1] == (
+        ["README.md", "data/**", "assets/**"],
+        ["data/all/**", "assets/**"],
+    )
+    assert _remote(hub, report.subsets[0].config).num_rows == 4
+
+
+def test_metadata_only_publish_has_no_image_bytes(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0,), images=False)
+    local = pq.read_table(workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet")
+    assert "image" not in local.column_names
+    assert local.num_rows == 4
+    assert hub.folder_uploads == [(["README.md", "data/**", "assets/**"], ["data/**", "assets/**"])]
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    assert "The 500 px images are added at the end of the run." in card
 
 
 def test_card_figures_and_upload(scored):
@@ -79,21 +108,18 @@ def test_card_figures_and_upload(scored):
     assert "| plantae | 2 | 2 |" in card
     assert "This gave 4 photos." in card
     assert "All 4 sample photos are scored." in card
+    assert "The 500 px images are added at the end of the run." not in card
     for name in ("hero", "map", "scores"):
         png = workdir / HUB_DIR / "assets" / f"{name}.png"
         assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         assert f"](assets/{name}.png)" in card
-    [(allow, delete)] = hub.folder_uploads
-    assert allow == ["README.md", "data/**", "assets/**"]
-    assert delete == ["data/**", "assets/**"]
     assert {"README.md", "assets/map.png"} <= set(hub.list_files(""))
 
 
 def test_card_documents_exactly_the_published_columns(scored):
     workdir, hub, _, _ = scored
     report = _publish(workdir, hub, (0.0,))
-    path = workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet"
-    columns = set(pq.read_schema(path).names)
+    columns = set(_remote(hub, report.subsets[0].config).column_names)
     documented = {n for f in fields(len(LANDSCAPE_PROMPTS)) for n in f.names}
     assert columns == documented
 
@@ -102,17 +128,11 @@ def test_stale_threshold_configs_are_removed(scored):
     workdir, hub, _, _ = scored
     _publish(workdir, hub, (0.0,))
     _publish(workdir, hub, (0.5,))
+    assert _remote(hub, "score_ge_0_00") is None
+    assert _remote(hub, "score_ge_0_50") is not None
+    _publish(workdir, hub, (0.5,), images=False)
     names = sorted(p.name for p in (workdir / HUB_DIR / "data").iterdir())
     assert names == ["all", "score_ge_0_50"]
-
-
-def test_medium_images_are_cached(scored):
-    workdir, hub, handler, _ = scored
-    _publish(workdir, hub, (0.0,))
-    handler.routes.clear()
-    report = _publish(workdir, hub, (0.0,))
-    assert report.subsets[0].rows == 4
-    assert report.images_failed == 0
 
 
 def test_photo_without_medium_image_is_left_out_of_image_configs(scored):
@@ -121,6 +141,14 @@ def test_photo_without_medium_image_is_left_out_of_image_configs(scored):
     report = _publish(workdir, hub, (0.0,))
     assert report.subsets[0].rows == 3
     assert report.images_failed == 1
+    assert 102 not in _remote(hub, report.subsets[0].config)["photo_id"].to_pylist()
+
+
+def test_an_empty_config_still_has_one_file(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0, 0.999999))
+    assert report.subsets[1].rows == 0
+    assert _remote(hub, report.subsets[1].config).num_rows == 0
 
 
 def test_publish_needs_scores(tmp_path):
@@ -131,8 +159,7 @@ def test_publish_needs_scores(tmp_path):
 def test_cap_per_cell_keeps_the_best_scored_photos(scored):
     workdir, hub, _, _ = scored
     report = _publish(workdir, hub, (0.0,), cap=1)
-    path = workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet"
-    table = pq.read_table(path).to_pylist()
+    table = _remote(hub, report.subsets[0].config).to_pylist()
     cells = [r["h3_cell"] for r in table]
     assert len(cells) == len(set(cells)) == 3  # 4 photos in 3 cells
     plant = max(
@@ -152,16 +179,3 @@ def test_contrast_score_configs(scored):
     assert report.subsets[0].config == "contrast_ge_0_00"
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "`score_contrast` ≥ 0.0, best 100 per cell" in card
-
-
-def test_configs_written_in_several_batches_are_complete(scored, monkeypatch):
-    workdir, hub, _, _ = scored
-    whole = _publish(workdir, hub, (0.0,))
-    path = workdir / HUB_DIR / f"data/{whole.subsets[0].config}/part-00000.parquet"
-    expected = pq.read_table(path)
-    monkeypatch.setattr("inat_landscape.pipeline.publish.IMAGE_ROWS", 1)
-    _publish(workdir, hub, (0.0,))
-    batched = pq.read_table(path)
-    assert batched.to_pylist() == expected.to_pylist()
-    features = json.loads(batched.schema.metadata[b"huggingface"])["info"]["features"]
-    assert features["image"] == {"_type": "Image"}

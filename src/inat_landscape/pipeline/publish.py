@@ -13,8 +13,6 @@ from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import (
     read_json,
     read_table,
-    write_batches,
-    write_bytes,
     write_table,
 )
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
@@ -33,9 +31,8 @@ from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import SCORE, SCORED
 
 IMAGE_SIZE = "medium"
-CACHE = Path("cache") / IMAGE_SIZE
 PART = "part-00000.parquet"
-IMAGE_ROWS = 1000  # rows of a threshold config written at a time
+STAGING = Path("publish-parts")  # one image part at a time, deleted after its upload
 
 
 @dataclass(frozen=True)
@@ -45,6 +42,8 @@ class PublishSpec:
     thresholds: tuple[float, ...]
     score: str = SCORE
     cap_per_cell: int = 100
+    images: bool = True
+    part_rows: int = 2000  # rows of the lowest config per image part (about 300 MB)
 
 
 @dataclass(frozen=True)
@@ -65,22 +64,19 @@ def run_publish(
     fetcher: Fetcher = fetch,
     repo_id: str = REPO_ID,
 ) -> PublishReport:
-    """Write `all`, one config per threshold, the figures and the card; then upload them."""
-    if not (workdir / SCORED).exists():
-        raise StageError(f"no scores at {workdir / SCORED}: run `score` first")
-    table = _with_urls(read_table(workdir / SCORED))
+    """Write `all`, one config per threshold, the figures and the card; then upload them.
+
+    With `spec.images`, the threshold configs carry the 500 px image and are uploaded part by
+    part (bounded disk); otherwise they hold the metadata only (quick refresh during a run).
+    """
+    table = _write_all(workdir)
     root = workdir / HUB_DIR
-    for folder in ("data", "assets"):
-        shutil.rmtree(root / folder, ignore_errors=True)
-    write_table(with_hf_features(table), root / "data" / "all" / PART)
-    lowest = _kept_mask(table, spec, spec.thresholds[0])
-    images = _medium_images(workdir, table.filter(pa.array(lowest)), fetcher)
-    ids = pa.array(list(images), pa.int64())
-    has_image = pc.is_in(table["photo_id"], ids).to_numpy(zero_copy_only=False)
-    masks = [_kept_mask(table, spec, t) & has_image for t in spec.thresholds]
+    kept = [_kept_mask(table, spec, t) for t in spec.thresholds]
+    names = [config_name(t, spec.score) for t in spec.thresholds]
+    has_image, delete = _write_configs(workdir, table, (names, kept), spec, (hub, fetcher))
+    masks = [m & has_image for m in kept]
     subsets = tuple(
-        _write_subset(root, table.filter(pa.array(m)), spec, t, images)
-        for m, t in zip(masks, spec.thresholds, strict=True)
+        Subset(n, t, int(m.sum())) for n, t, m in zip(names, spec.thresholds, masks, strict=True)
     )
     _figures(root / "assets", workdir, table, spec)
     info = _card_info(
@@ -96,9 +92,63 @@ def run_publish(
         root,
         f"Publish {table.num_rows} scored photos",
         allow=["README.md", "data/**", "assets/**"],
-        delete=["data/**", "assets/**"],
+        delete=delete,
     )
-    return PublishReport(table.num_rows, subsets, int((lowest & ~has_image).sum()))
+    return PublishReport(table.num_rows, subsets, int((kept[0] & ~has_image).sum()))
+
+
+def _write_all(workdir: Path) -> pa.Table:
+    """Clear the local configs and figures, and write `all` (every scored photo, with URLs)."""
+    if not (workdir / SCORED).exists():
+        raise StageError(f"no scores at {workdir / SCORED}: run `score` first")
+    table = _with_urls(read_table(workdir / SCORED))
+    root = workdir / HUB_DIR
+    for folder in ("data", "assets"):
+        shutil.rmtree(root / folder, ignore_errors=True)
+    write_table(with_hf_features(table), root / "data" / "all" / PART)
+    return table
+
+
+Configs = tuple[list[str], list[np.ndarray]]  # config names, and the rows each one keeps
+
+
+def _write_configs(
+    workdir: Path, table: pa.Table, configs: Configs, spec: PublishSpec, io: tuple[Hub, Fetcher]
+) -> tuple[np.ndarray, list[str]]:
+    """Write the threshold configs; return which rows have an image, and the remote files
+    that the final upload replaces."""
+    hub, fetcher = io
+    if spec.images:
+        has_image = _upload_image_parts(workdir, table, configs, spec.part_rows, hub, fetcher)
+        return has_image, ["data/all/**", "assets/**"]
+    for name, mask in zip(*configs, strict=True):
+        subset = with_hf_features(table.filter(pa.array(mask)))
+        write_table(subset, workdir / HUB_DIR / "data" / name / PART)
+    return np.ones(table.num_rows, dtype=bool), ["data/**", "assets/**"]
+
+
+def _upload_image_parts(
+    workdir: Path, table: pa.Table, configs: Configs, part_rows: int, hub: Hub, fetcher: Fetcher
+) -> np.ndarray:
+    """Upload the threshold configs with their images, one commit per part of the lowest
+    config; return which rows have an image. The configs on the hub are replaced."""
+    names, kept = configs
+    for config in {f.split("/")[1] for f in hub.list_files("data/")} - {"all"}:
+        hub.delete_folder(f"data/{config}", f"Remove config {config} before the image build")
+    rows = np.flatnonzero(kept[0])
+    has_image = np.zeros(table.num_rows, dtype=bool)
+    staging = workdir / STAGING
+    for p, start in enumerate(range(0, max(len(rows), 1), part_rows)):
+        part = rows[start : start + part_rows]
+        images = _medium_images(table.take(pa.array(part, pa.int64())), fetcher)
+        has_image[part] = np.isin(table["photo_id"].to_numpy()[part], list(images))
+        for name, mask in zip(names, kept, strict=True):
+            chosen = part[mask[part] & has_image[part]]
+            subset = _with_images(table.take(pa.array(chosen, pa.int64())), images)
+            write_table(with_hf_features(subset), staging / "data" / name / f"part-{p:05d}.parquet")
+        hub.upload_folder(staging, f"Add image part {p}", allow=["data/**"], delete=[])
+        shutil.rmtree(staging)
+    return has_image
 
 
 def _kept_mask(table: pa.Table, spec: PublishSpec, threshold: float) -> np.ndarray:
@@ -147,6 +197,7 @@ def _card_info(
         cap_per_cell=spec.cap_per_cell,
         embed_cap=params.get("cap", 0),
         h3_res=params.get("res", 0),
+        with_images=spec.images,
     )
 
 
@@ -200,41 +251,15 @@ def _with_urls(table: pa.Table) -> pa.Table:
     return table.append_column("url_medium", pa.array([p[1] for p in pairs], pa.string()))
 
 
-def _medium_images(workdir: Path, table: pa.Table, fetcher: Fetcher) -> dict[int, Path]:
-    """Return the cache file of the medium image of each photo, downloading missing ones."""
-    pairs = zip(table["photo_id"].to_pylist(), table["extension"].to_pylist(), strict=True)
-    paths = {i: workdir / CACHE / f"{i}.{e}" for i, e in pairs}
-    _download_missing(paths, fetcher)
-    return {i: p for i, p in paths.items() if p.exists()}
+def _medium_images(rows: pa.Table, fetcher: Fetcher) -> dict[int, bytes]:
+    """Download the medium image of each row; failed downloads are left out."""
+    pairs = zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True)
+    results = fetcher({i: photo_url(i, IMAGE_SIZE, e) for i, e in pairs})
+    return {r.photo_id: r.data for r in results if r.data is not None}
 
 
-def _download_missing(paths: dict[int, Path], fetcher: Fetcher) -> None:
-    missing = {
-        i: photo_url(i, IMAGE_SIZE, p.suffix[1:]) for i, p in paths.items() if not p.exists()
-    }
-    for result in fetcher(missing):
-        if result.data is not None:
-            write_bytes(result.data, paths[result.photo_id])
-
-
-def _write_subset(
-    root: Path, subset: pa.Table, spec: PublishSpec, threshold: float, images: dict[int, Path]
-) -> Subset:
-    """Write one config with its images, IMAGE_ROWS rows at a time (bounded memory)."""
-    name = config_name(threshold, spec.score)
-    schema = with_hf_features(_with_images(subset.slice(0, 0), images)).schema
-    parts = (
-        _with_images(subset.slice(start, IMAGE_ROWS), images).replace_schema_metadata(
-            schema.metadata
-        )
-        for start in range(0, subset.num_rows, IMAGE_ROWS)
-    )
-    write_batches(parts, schema, root / "data" / name / PART)
-    return Subset(name, threshold, subset.num_rows)
-
-
-def _with_images(rows: pa.Table, images: dict[int, Path]) -> pa.Table:
+def _with_images(rows: pa.Table, images: dict[int, bytes]) -> pa.Table:
     pairs = zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True)
     names = [(i, f"{i}.{e}") for i, e in pairs]
-    column = image_column([images[i].read_bytes() for i, _ in names], [n for _, n in names])
+    column = image_column([images[i] for i, _ in names], [n for _, n in names])
     return rows.append_column("image", column)

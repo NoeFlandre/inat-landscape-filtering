@@ -16,4 +16,5 @@ nav:
       - adr/0007-density-cap.md
       - adr/0008-negative-prompts.md
       - adr/0009-grid5000-workers.md
+      - adr/0010-images-in-parts.md
   - Technical debt: tech-debt.md

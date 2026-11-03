@@ -6,7 +6,7 @@ from typing import cast
 import httpx
 import pytest
 from huggingface_hub import HfApi
-from huggingface_hub.errors import RepositoryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 from inat_landscape.adapters.hub import HfHub, OfflineHub
 
@@ -34,6 +34,11 @@ class FakeApi:
 
     def upload_file(self, **kw):
         self.calls.append(("upload_file", kw["path_in_repo"], kw["repo_type"]))
+
+    def delete_folder(self, **kw):
+        self.calls.append(("delete_folder", kw["path_in_repo"]))
+        if kw["path_in_repo"] == "missing":
+            raise EntryNotFoundError("missing")
 
     def upload_folder(self, **kw):
         self.calls.append(("upload_folder", kw["allow_patterns"], kw["delete_patterns"]))
@@ -81,3 +86,12 @@ def test_private_hub_creates_a_private_repo(tmp_path):
     api = FakeApi()
     HfHub("u/state", api=cast("HfApi", api), private=True).upload_file(tmp_path, "x", "m")
     assert api.calls[0] == ("create", "u/state", "dataset", True, True)
+
+
+def test_delete_folder_ignores_a_missing_folder():
+    api = FakeApi()
+    hub = _hub(api)
+    hub.delete_folder("data/x", "m")
+    hub.delete_folder("missing", "m")
+    assert ("delete_folder", "data/x") in api.calls
+    OfflineHub().delete_folder("data/x", "m")
