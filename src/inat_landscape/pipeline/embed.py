@@ -32,6 +32,7 @@ _DECODE_THREADS = min(16, os.process_cpu_count() or 4)
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
 ONE_WORKER = Slots(0, 1, 1)  # all the photos
+PUSH_SECONDS = 1800.0  # at most one commit of shards per job and half hour (hub: 128/hour)
 _FAILURE_SCHEMA = pa.schema(
     [
         ("photo_id", pa.int64()),
@@ -150,20 +151,13 @@ def run_embed(
     failure. Parallel workers on other machines share the work through the hub shards."""
     chunk, worker = options.chunk, options.worker
     work = _work(workdir, encoder.model_id, hub, worker)
-    shard = _Shard(work.store, chunk)
     todo = work.todo[: options.max_photos]
-    deadline = _deadline(options.max_seconds)
-    embedded = failed = 0
-    for part, ids, images, bad in _prefetched(todo, fetcher, min(chunk, options.download_batch)):
-        if ids:
-            shard.add(ids, np.asarray(encoder.encode_images(images)))
-        embedded, failed = embedded + len(ids), failed + len(bad)
-        _record_failures(workdir / failures_name(worker), work.failures, part, bad)
-        _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
-        if time.monotonic() >= deadline:
-            _LOG.info("time limit reached: the next job continues")
-            break
-    shard.flush()
+    shard = _Shard(work.store, chunk)
+    try:
+        embedded, failed = _embed_all(workdir, encoder, (work, shard), todo, fetcher, options)
+    finally:
+        shard.flush()
+        _try_push(work.store, tries=4, wait=60.0)  # the last shards, also after an error
     return EmbedReport(
         total=len(work.ids),
         already=len(work.done.intersection(work.ids)),
@@ -171,6 +165,53 @@ def run_embed(
         embedded=embedded,
         failed=failed,
     )
+
+
+def _embed_all(
+    workdir: Path,
+    encoder: Encoder,
+    state: "tuple[_Work, _Shard]",
+    todo: list[dict],
+    fetcher: Fetcher,
+    options: EmbedOptions,
+) -> tuple[int, int]:
+    """Embed the photos of `todo` batch by batch. Return the embedded and failed counts."""
+    work, shard = state
+    deadline, pushed = _deadline(options.max_seconds), time.monotonic()
+    embedded = failed = 0
+    batch = min(options.chunk, options.download_batch)
+    for part, ids, images, bad in _prefetched(todo, fetcher, batch):
+        if ids:
+            shard.add(ids, np.asarray(encoder.encode_images(images)))
+        embedded, failed = embedded + len(ids), failed + len(bad)
+        _record_failures(workdir / failures_name(options.worker), work.failures, part, bad)
+        _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
+        pushed = _push_now(work.store, pushed)
+        if time.monotonic() >= deadline:
+            _LOG.info("time limit reached: the next job continues")
+            break
+    return embedded, failed
+
+
+def _push_now(store: EmbeddingStore, pushed: float) -> float:
+    """Push the written shards when PUSH_SECONDS passed since `pushed`; return the push time."""
+    if time.monotonic() - pushed < PUSH_SECONDS:
+        return pushed
+    _try_push(store)
+    return time.monotonic()
+
+
+def _try_push(store: EmbeddingStore, tries: int = 1, wait: float = 0.0) -> bool:
+    """Push the written shards; on a hub error (for example the commit rate limit), log it
+    and keep the shards for the next push. Return True when they are on the hub."""
+    for attempt in range(tries):
+        try:
+            _LOG.info("pushed %d shards", store.push())
+            return True
+        except Exception as exc:
+            _LOG.warning("push failed (try %d of %d): %s", attempt + 1, tries, exc)
+            time.sleep(wait)
+    return False
 
 
 def _deadline(max_seconds: float | None) -> float:
@@ -206,7 +247,7 @@ class _Shard:
 
     def flush(self) -> None:
         if self.ids:
-            self.store.add(self.ids, np.concatenate(self.rows))
+            self.store.add(self.ids, np.concatenate(self.rows), upload=False)
             self.ids, self.rows = [], []
 
 

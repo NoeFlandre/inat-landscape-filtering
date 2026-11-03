@@ -90,6 +90,7 @@ def test_image_configs_are_nested_carry_images_and_leave_no_local_parts(scored):
 
 def test_image_parts_are_uploaded_one_commit_each(scored):
     workdir, hub, _, _ = scored
+    hub.folder_uploads.clear()  # the embed run of the fixture committed its shards
     report = _publish(workdir, hub, (0.0, 0.5), part_rows=1)
     assert [
         len(list((hub.remote / "data" / s.config).glob("*.parquet"))) for s in report.subsets
@@ -105,6 +106,7 @@ def test_image_parts_are_uploaded_one_commit_each(scored):
 
 def test_metadata_only_publish_has_no_image_bytes(scored):
     workdir, hub, _, _ = scored
+    hub.folder_uploads.clear()  # the embed run of the fixture committed its shards
     report = _publish(workdir, hub, (0.0,), images=False)
     local = pq.read_table(workdir / HUB_DIR / f"data/{report.subsets[0].config}/part-00000.parquet")
     assert "image" not in local.column_names

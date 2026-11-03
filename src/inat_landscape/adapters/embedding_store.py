@@ -39,12 +39,16 @@ class EmbeddingStore:
         return self.root / self.remote_dir
 
     def push(self) -> int:
-        """Upload local shards that are not on the hub yet. Return how many."""
+        """Upload the local shards that are not on the hub yet, in one commit. Return how many.
+
+        The hub allows 128 commits per hour on a repository: tens of GPU jobs must not
+        commit each shard.
+        """
         remote = set(self._remote_shards())
         local = [str(p.relative_to(self.root)) for p in self._shards()]
         missing = [p for p in local if p not in remote]
-        for path in missing:
-            self.hub.upload_file(self.root / path, path, "Add embeddings made offline")
+        if missing:
+            self.hub.upload_folder(self.root, f"Add {len(missing)} embedding shards", missing, [])
         return len(missing)
 
     def _remote_shards(self) -> list[str]:
@@ -129,8 +133,9 @@ class EmbeddingStore:
             for i in pq.read_table(shard, columns=["photo_id"])["photo_id"].to_pylist()
         }
 
-    def add(self, photo_ids: Sequence[int], embeddings: np.ndarray) -> Path:
-        """Write one shard and upload it. The shard name is a hash of its ids."""
+    def add(self, photo_ids: Sequence[int], embeddings: np.ndarray, *, upload: bool = True) -> Path:
+        """Write one shard, and upload it (else `push` uploads it later). The shard name is a
+        hash of its ids."""
         if len(photo_ids) != len(embeddings):
             raise ValueError("photo_ids and embeddings differ in length")
         digest = hashlib.sha256(np.asarray(photo_ids, np.int64).tobytes()).hexdigest()[:16]
@@ -142,7 +147,8 @@ class EmbeddingStore:
         write_table(
             pa.table({"photo_id": pa.array(photo_ids, pa.int64()), "embedding": column}), path
         )
-        self.hub.upload_file(path, name, f"Add {len(photo_ids)} embeddings")
+        if upload:
+            self.hub.upload_file(path, name, f"Add {len(photo_ids)} embeddings")
         return path
 
     def _shards(self) -> list[Path]:

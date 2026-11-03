@@ -71,8 +71,11 @@ left=$((START + 3600 - 360 - $(date +%s)))
 # One process downloads about 70 photos per second: use the cores of the job (2 for the
 # model and the decode threads).
 procs=$(( $(nproc) - 2 )); [ "$procs" -ge 1 ] || procs=1; [ "$procs" -le 12 ] || procs=12
+# An error (for example a refused upload) must not end the chain: the next job continues,
+# and it stops by itself when a job makes no progress.
 run embed --worker "$WORKER" --chunk 200000 --batch-size 256 --concurrency 64 --download-batch 4096 \
-    --fetch-processes "$procs" --max-seconds "$left" "${compile[@]}"
+    --fetch-processes "$procs" --max-seconds "$left" "${compile[@]}" \
+    || echo "embed failed (exit $?): the next job tries again" >&2
 save_failures
 # The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
 if [ "${WORKER#*/}" = 1 ]; then

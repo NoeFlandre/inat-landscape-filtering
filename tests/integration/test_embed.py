@@ -234,3 +234,40 @@ def test_a_slot_range_embeds_the_photos_of_all_its_slots(setup):
     names = [p.rsplit("/", 1)[-1] for p in hub.list_files("embeddings/")]
     assert all(n.startswith("part-w1-3of3-") for n in names)
     assert (workdir / "failures-1-3-of-3.parquet").exists() or report.failed == 0
+
+
+def test_a_run_uploads_its_shards_in_one_commit(setup):
+    # Bug: one commit per shard passed the Hugging Face limit of 128 commits per hour
+    # with 39 jobs, and the failed upload stopped the jobs.
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    _embed(workdir, hub, FakeEncoder())  # chunk=2: two shards
+    shards = [p for p in hub.list_files("embeddings/") if p.endswith(".parquet")]
+    assert len(shards) == 2
+    assert sorted(hub.uploads) == sorted(shards)  # the files of one folder upload
+    assert len(hub.folder_uploads) == 1
+
+
+def test_a_long_run_also_commits_on_the_way(setup, monkeypatch):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    monkeypatch.setattr("inat_landscape.pipeline.embed.PUSH_SECONDS", 0.0)
+    _embed(workdir, hub, FakeEncoder(), download_batch=2)
+    assert len(hub.folder_uploads) >= 2
+
+
+def test_a_refused_push_keeps_the_shards_for_the_next_push(setup, monkeypatch):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    monkeypatch.setattr("inat_landscape.pipeline.embed.time.sleep", lambda _s: None)
+    calls = []
+
+    def refuse(*args):
+        calls.append(args)
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(hub, "upload_folder", refuse)
+    report = _embed(workdir, hub, FakeEncoder())
+    assert report.embedded == 4  # the run ends normally
+    assert len(calls) == 4  # the last push tried 4 times
+    assert len(list((workdir / HUB_DIR).rglob("part-*.parquet"))) == 2  # kept for later
