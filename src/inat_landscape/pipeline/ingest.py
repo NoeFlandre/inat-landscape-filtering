@@ -26,9 +26,8 @@ from inat_landscape.adapters.inat_dump import (
     recap,
     scan_taxa,
 )
-from inat_landscape.domain.licensing import attribution
 from inat_landscape.domain.sampling import sample_prefix
-from inat_landscape.domain.taxa import TAXA_SCOPE, classify
+from inat_landscape.domain.taxa import LIFE, TAXA_SCOPE, Group, classify
 
 TAXA = "ingest/taxa.parquet"
 SELECTED = "ingest/selected.parquet"
@@ -129,27 +128,42 @@ def build_candidates(dump: DumpSlice, selected: pa.Table) -> pa.Table:
         .join(observers, "observer_id", join_type="left outer")
         .join(selected.select(["photo_id", "h3_cell"]), "photo_id", join_type="inner")
     )
-    groups = [
-        classify(t, a)
-        for t, a in zip(table["taxon_id"].to_pylist(), table["ancestry"].to_pylist(), strict=True)
-    ]
-    table = table.append_column("group", pa.array([g.value for g in groups], pa.string()))
+    table = table.append_column("group", groups(table["taxon_id"], taxa))
     table = table.drop_columns(["ancestry"])
     table = table.set_column(
         table.schema.get_field_index("license"), "license", pc.utf8_upper(table["license"])
     )
-    table = table.append_column("attribution", pa.array(_attributions(table), pa.string()))
+    table = table.append_column("attribution", attributions(table))
     return table.sort_by([("photo_id", "ascending")])
 
 
-def _attributions(table: pa.Table) -> list[str]:
-    rows = zip(
-        table["license"].to_pylist(),
-        table["observer_name"].to_pylist(),
-        table["login"].to_pylist(),
-        table["observer_id"].to_pylist(),
-        strict=True,
+def groups(taxon_ids: pa.Array | pa.ChunkedArray, taxa: pa.Table) -> pa.Array:
+    """Return the group of each taxon id (`classify`), computed once for each taxon.
+
+    `taxa` has the `taxon_id` and `ancestry` of the taxa. An id that is not in `taxa` has no
+    known ancestry.
+    """
+    pairs = zip(taxa["taxon_id"].to_pylist(), taxa["ancestry"].to_pylist(), strict=True)
+    names = pa.array([classify(t, a).value for t, a in pairs], pa.string())
+    found = pc.take(names, pc.index_in(taxon_ids, taxa["taxon_id"]))
+    unknown = pc.if_else(  # classify(id, None): no taxon or Life is unidentified, else other
+        pc.fill_null(pc.equal(taxon_ids, LIFE), True), Group.UNIDENTIFIED.value, Group.OTHER.value
     )
-    return [
-        attribution(lic, name, login or f"iNaturalist user {oid}") for lic, name, login, oid in rows
-    ]
+    return pc.coalesce(found, unknown)
+
+
+def attributions(table: pa.Table) -> pa.Array:
+    """Return the attribution text of each photo (`attribution`), for whole columns at once."""
+    code = pc.utf8_upper(table["license"])
+    fallback = pc.binary_join_element_wise(
+        "iNaturalist user ", pc.cast(table["observer_id"], pa.string()), ""
+    )
+    who = pc.coalesce(_text(table["observer_name"]), _text(table["login"]), fallback)
+    cc0 = pc.binary_join_element_wise(who, ", no rights reserved (CC0)", "")
+    other = pc.binary_join_element_wise("© ", who, ", some rights reserved (", code, ")", "")
+    return pc.if_else(pc.equal(code, "CC0"), cc0, other)
+
+
+def _text(column: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+    """Return the column with empty strings as nulls (`name or login` in the domain rule)."""
+    return pc.if_else(pc.equal(column, ""), pa.scalar(None, pa.string()), column)

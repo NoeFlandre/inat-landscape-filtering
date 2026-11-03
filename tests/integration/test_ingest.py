@@ -5,13 +5,19 @@ import json
 
 import numpy as np
 import pyarrow as pa
+from hypothesis import given
+from hypothesis import strategies as st
 
+from inat_landscape.domain.licensing import attribution
+from inat_landscape.domain.taxa import classify
 from inat_landscape.pipeline.ingest import (
     CANDIDATES,
     COUNTS,
     MANIFEST,
     IngestParams,
+    attributions,
     eligible_taxa,
+    groups,
     run_index,
     run_ingest,
 )
@@ -140,3 +146,46 @@ def test_an_index_of_another_taxa_scope_is_not_reused(tmp_path):
     before = len(calls)
     _run(tmp_path, calls)
     assert len(calls) > before + 1  # the index pass runs again, then the details pass
+
+
+names = st.one_of(st.none(), st.just(""), st.text(max_size=5))
+
+
+@given(
+    st.lists(
+        st.tuples(st.sampled_from(["CC0", "CC-BY", "CC-BY-NC"]), names, names, st.integers(1, 99)),
+        max_size=30,
+    )
+)
+def test_vectorized_attributions_equal_the_domain_rule(rows):
+    table = pa.table(
+        {
+            "license": pa.array([r[0] for r in rows], pa.string()),
+            "observer_name": pa.array([r[1] for r in rows], pa.string()),
+            "login": pa.array([r[2] for r in rows], pa.string()),
+            "observer_id": pa.array([r[3] for r in rows], pa.int64()),
+        }
+    )
+    expected = [attribution(c, n, lg or f"iNaturalist user {i}") for c, n, lg, i in rows]
+    assert attributions(table).to_pylist() == expected
+
+
+@given(
+    st.lists(
+        st.tuples(
+            st.one_of(st.none(), st.sampled_from([3, 47126, 48460, 52775, 999, 47170])),
+        ),
+        max_size=30,
+    )
+)
+def test_vectorized_groups_equal_the_domain_rule(rows):
+    taxa = pa.table(
+        {
+            "taxon_id": [3, 47126, 48460, 52775, 47170],
+            "ancestry": ["48460/1/2", "48460", None, "48460/47126/211194", "48460"],
+        }
+    )
+    ancestry = dict(zip(taxa["taxon_id"].to_pylist(), taxa["ancestry"].to_pylist(), strict=True))
+    ids = [r[0] for r in rows]
+    expected = [classify(t, ancestry.get(t)).value for t in ids]
+    assert groups(pa.array(ids, pa.int64()), taxa).to_pylist() == expected

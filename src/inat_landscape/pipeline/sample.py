@@ -7,8 +7,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from inat_landscape.adapters.files import read_table, write_table
-from inat_landscape.adapters.inat_dump import open_source
-from inat_landscape.domain.sampling import uniform_order, uuid_key
+from inat_landscape.adapters.inat_dump import open_source, uuid_keys
+from inat_landscape.domain.sampling import uniform_order
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES, IngestParams, Opener, run_index
 
@@ -45,7 +45,7 @@ def run_sample(workdir: Path, n: int | None) -> pa.Table:
 
 
 def _columns(table: pa.Table) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    keys = np.array([uuid_key(u) for u in table["observation_uuid"].to_pylist()], np.uint64)
+    keys = uuid_keys(table["observation_uuid"])  # vectorized `uuid_key`
     positions = pc.fill_null(table["position"], 0).to_numpy()  # missing position sorts first
     cells = pc.dictionary_encode(table["h3_cell"]).combine_chunks().indices.to_numpy()
     return keys, positions.astype(np.int64), table["photo_id"].to_numpy(), cells.astype(np.int64)
