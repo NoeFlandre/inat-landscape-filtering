@@ -2,6 +2,7 @@
 
 import io
 import json
+import logging
 import subprocess
 import sys
 
@@ -152,3 +153,11 @@ def test_dump_file_reads_a_local_copy_and_keeps_the_source(deps, tmp_path, capsy
     assert "worklist=4" in capsys.readouterr().out
     index = json.loads((tmp_path / "w" / "ingest" / "index.json").read_text())
     assert index["source"] == "https://example.org/dump.tar.gz"
+
+
+def test_http_clients_log_no_line_per_request(deps, tmp_path):
+    # Bug: httpx logged each photo request at INFO; on the NFS /home of Grid'5000 the log
+    # writes stalled the download loop at about 60 photos per second.
+    _run(deps, tmp_path, "status", "--model", FakeEncoder.model_id)
+    for name in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING, name

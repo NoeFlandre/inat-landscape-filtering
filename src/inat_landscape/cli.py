@@ -55,10 +55,15 @@ class Deps:
     fetcher: Callable[..., list[Fetched]] = fetch
 
 
+_QUIET_LOGGERS = ("httpx", "httpcore", "huggingface_hub", "urllib3")
+
+
 def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     """Run one command and return its exit code."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
+    for noisy in _QUIET_LOGGERS:  # one line per HTTP request: millions of lines in a run
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         args.handler(args, deps or Deps())
     except _ERRORS as exc:
