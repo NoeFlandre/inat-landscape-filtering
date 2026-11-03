@@ -39,7 +39,7 @@ import sys
 busy = set()
 for line in open(sys.argv[2]):  # 3-of-9 or 3-6-of-9 (slots 3 to 5)
     if line.strip():
-        span = line.strip().rsplit("-of-", 1)[0].split("-")
+        span = line.strip().lstrip("-").rsplit("-of-", 1)[0].split("-")
         busy.update(range(int(span[0]), int(span[-1]) + (len(span) == 1)))
 print(",".join(str(i) for i in range(int(sys.argv[1])) if i not in busy))
 ' "$count" "$tmp/busy")"
