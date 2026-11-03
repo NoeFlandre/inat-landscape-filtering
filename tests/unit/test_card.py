@@ -144,10 +144,19 @@ def test_progress_line():
     assert "All 10 sample photos are scored." in render_card(done)
 
 
-def test_card_says_when_images_come_later():
-    assert "The 500 px images are added at the end of the run." not in render_card(_info())
+def test_a_card_without_images_points_to_the_image_urls():
     card = render_card(replace(_info(), with_images=False))
-    assert "embedding.**\n\nThe 500 px images are added at the end of the run.\n\n" in card
+    assert "and come with the URL of their 500 px image (`url_medium`)" in card
+    assert "with the 500 px image" not in card
+    assert "added at the end of the run" not in card
+    assert "# strictest threshold\n" in card
+    assert "best 100 per cell, with the URL of the 500 px image |" in card
+
+
+def test_a_card_with_images_says_so():
+    card = render_card(_info())
+    assert "and come with their 500 px image" in card
+    assert "# strictest threshold, with images" in card
 
 
 def test_card_acknowledges_grid5000():

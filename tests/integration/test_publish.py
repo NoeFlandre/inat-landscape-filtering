@@ -113,7 +113,7 @@ def test_metadata_only_publish_has_no_image_bytes(scored):
     assert local.num_rows == 4
     assert hub.folder_uploads == [(["README.md", "data/**", "assets/**"], ["data/**", "assets/**"])]
     card = (workdir / HUB_DIR / "README.md").read_text()
-    assert "The 500 px images are added at the end of the run." in card
+    assert "come with the URL of their 500 px image" in card
 
 
 def test_card_figures_and_upload(scored):
@@ -125,7 +125,7 @@ def test_card_figures_and_upload(scored):
     assert "| plantae | 2 | 2 |" in card
     assert "This gave 4 photos." in card
     assert "All 4 sample photos are scored." in card
-    assert "The 500 px images are added at the end of the run." not in card
+    assert "come with the URL of their 500 px image" not in card
     for name in ("hero", "map", "scores"):
         png = workdir / HUB_DIR / "assets" / f"{name}.png"
         assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

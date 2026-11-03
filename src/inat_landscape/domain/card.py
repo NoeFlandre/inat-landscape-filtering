@@ -68,7 +68,7 @@ class CardInfo:
     cap_per_cell: int
     embed_cap: int
     h3_res: int
-    with_images: bool = True  # False while the run goes on: the images are added at the end
+    with_images: bool = True  # False: the threshold configs give the image URLs only
     layer_cap: int | None = None  # complete layers of the uniform order (ADR 0011), if any
 
 
@@ -198,9 +198,9 @@ threshold keep their image](assets/hero.png)
 that tells if the photo shows a landscape.**
 
 **{low.rows:,} photos reach the lowest threshold ({low.threshold} on `{info.score}`, at most \
-{info.cap_per_cell} per H3 cell) and come with their 500 px image. All {info.total:,} come \
+{info.cap_per_cell} per H3 cell) and come with {_image_words(info)}. All {info.total:,} come \
 with a {info.embedding_dim}-dimension \
-[`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**{_images_note(info)}
+[`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**
 
 The photos come from the [iNaturalist Open Data]\
 (https://github.com/inaturalist/inaturalist-open-data) snapshot of \
@@ -216,12 +216,13 @@ in grey](assets/map.png)
 
 def _quick_start(info: CardInfo) -> str:
     repo, top = info.repo_id, info.subsets[-1].config
+    strictest = f"strictest threshold{_images_comment(info)}"
     return f"""## Quick start
 
 ```python
 from datasets import load_dataset
 
-photos = load_dataset("{repo}", "{top}", split="train")  # strictest threshold, with images
+photos = load_dataset("{repo}", "{top}", split="train")  # {strictest}
 scores = load_dataset("{repo}", split="train")  # all photos: metadata and scores
 emb = load_dataset("{repo}", "embeddings", split="train")  # photo_id, embedding
 ```
@@ -260,15 +261,25 @@ Score quantiles, over all {info.total:,} photos:
 """
 
 
-def _images_note(info: CardInfo) -> str:
-    return "" if info.with_images else "\n\nThe 500 px images are added at the end of the run."
+def _image_words(info: CardInfo) -> str:
+    return (
+        "their 500 px image" if info.with_images else "the URL of their 500 px image (`url_medium`)"
+    )
+
+
+def _images_comment(info: CardInfo) -> str:
+    return ", with images" if info.with_images else ""
+
+
+def _with_image(info: CardInfo) -> str:
+    return "with the 500 px image" if info.with_images else "with the URL of the 500 px image"
 
 
 def _configs_table(info: CardInfo) -> str:
     rows = [f"| `all` (default) | {info.total:,} | Metadata and scores, no image |"]
     rows += [
         f"| `{s.config}` | {s.rows:,} | `{info.score}` ≥ {s.threshold}, best "
-        f"{info.cap_per_cell} per cell, with the 500 px image |"
+        f"{info.cap_per_cell} per cell, {_with_image(info)} |"
         for s in info.subsets
     ]
     rows.append(
@@ -318,7 +329,7 @@ def _files(info: CardInfo) -> str:
 
 ```
 data/all/*.parquet                      all photos: metadata and scores
-data/<config>/*.parquet                 photos at or above a threshold, with the 500 px image
+data/<config>/*.parquet                 photos at or above a threshold, {_with_image(info)}
 {info.embedding_dir}/*.parquet   photo_id and SigLIP2 embedding
 assets/                                 figures of this card
 ```
@@ -374,8 +385,8 @@ bucket.
 than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).
 7. **Thresholds.** {", ".join(str(s.threshold) for s in info.subsets)} on `{info.score}`. \
-Each threshold config keeps at most {info.cap_per_cell} photos per cell, the best scored, with \
-their `medium` image (500 px).
+Each threshold config keeps at most {info.cap_per_cell} photos per cell, the best scored, \
+{_with_image(info)}.
 
 Code, with the decisions and their tradeoffs: [{REPO_URL.removeprefix("https://")}]\
 ({REPO_URL}).

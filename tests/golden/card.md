@@ -152,7 +152,7 @@ Each score is `sigmoid(scale * cosine + bias)` between the image embedding and a
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data bucket.
 5. **Embeddings.** The `small` photo (240 px longest side) goes through [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224). Download and decode cost more than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).
-7. **Thresholds.** 0.1, 0.5, 0.9 on `score_landscape`. Each threshold config keeps at most 100 photos per cell, the best scored, with their `medium` image (500 px).
+7. **Thresholds.** 0.1, 0.5, 0.9 on `score_landscape`. Each threshold config keeps at most 100 photos per cell, the best scored, with the 500 px image.
 
 Code, with the decisions and their tradeoffs: [github.com/NoeFlandre/inat-landscape-filtering](https://github.com/NoeFlandre/inat-landscape-filtering).
 
