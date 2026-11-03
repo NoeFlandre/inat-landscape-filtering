@@ -10,7 +10,8 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
-MODE="${1:?usage: publish.oar refresh|final}"
+MODE="${1:?usage: publish.oar refresh|final [CAP_PER_CELL]}"
+CAP_PER_CELL="${2:-1000}"  # photos per H3 cell in each threshold config
 BASE="/tmp/inat-$USER-publish"
 # A copy on the node /tmp: a `git pull` on the NFS /home does not stop the job.
 if [ "$0" != "$BASE/publish.oar" ]; then
@@ -31,10 +32,10 @@ cd "$REPO_DIR"
 uv sync --locked -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
-run state pull
+run state pull --only ingest/manifest.json,ingest/candidates.parquet,sample.parquet,failures.parquet
 publish() {  # $1: --images or --no-images
     run score | grep -E "^n=" || true
-    run publish --score score_contrast --thresholds 0.04,0.06,0.08 --cap-per-cell 10 "$1"
+    run publish --score score_contrast --thresholds 0.04,0.06,0.08 --cap-per-cell "$CAP_PER_CELL" "$1"
 }
 if [ "$MODE" = final ]; then
     publish --images
