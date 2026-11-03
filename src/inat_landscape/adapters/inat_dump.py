@@ -360,17 +360,24 @@ def _id_in(ids: pa.Array, sorted_ids: NDArray[np.int64]) -> pa.Array:
     each batch of the dump.
     """
     values = pc.fill_null(ids, -1).to_numpy(zero_copy_only=False)
-    at = np.minimum(np.searchsorted(sorted_ids, values), max(len(sorted_ids) - 1, 0))
-    found = sorted_ids[at] == values if len(sorted_ids) else np.zeros(len(values), dtype=bool)
-    return pc.and_(pa.array(found), pc.is_valid(ids))
+    return pc.and_(pa.array(_sorted_in(values, sorted_ids)), pc.is_valid(ids))
 
 
 def _key_in(uuids: pa.Array, sorted_keys: NDArray[np.uint64]) -> pa.Array:
     valid = pc.fill_null(_valid_uuid(uuids), False).to_numpy(zero_copy_only=False)
     keys = uuid_keys(uuids.filter(pa.array(valid)))
     hit = np.zeros(len(uuids), dtype=bool)
-    hit[np.flatnonzero(valid)] = np.isin(keys, sorted_keys, assume_unique=False)
+    hit[np.flatnonzero(valid)] = _sorted_in(keys, sorted_keys)
     return pa.array(hit)
+
+
+def _sorted_in(values: NDArray, sorted_values: NDArray) -> NDArray[np.bool_]:
+    """Tell which values are in `sorted_values`, by binary search (np.isin would sort the
+    tens of millions of selected values again for each batch)."""
+    if not len(sorted_values):
+        return np.zeros(len(values), dtype=bool)
+    at = np.minimum(np.searchsorted(sorted_values, values), len(sorted_values) - 1)
+    return sorted_values[at] == values
 
 
 def _valid_uuid(uuids: pa.Array) -> pa.Array:
