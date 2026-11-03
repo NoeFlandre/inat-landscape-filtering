@@ -76,31 +76,41 @@ def test_gpus_that_the_cuda_build_cannot_use_are_left_out():
         assert free_gpus.usable(model), model
 
 
-def test_plan_gives_each_free_gpu_one_slot_of_one_global_count():
+def test_plan_gives_each_free_gpu_one_free_slot_of_the_global_count():
     found = {
         "lille": [{"cluster": "chuc", "free": 2, "options": ["-p", "cluster='chuc'"]}],
         "nancy": [{"cluster": "grue", "free": 1, "options": ["-q", "production"]}],
     }
-    assert free_gpus.plan(found) == [
-        {"slot": "0/3", "site": "lille", "options": ["-p", "cluster='chuc'"]},
-        {"slot": "1/3", "site": "lille", "options": ["-p", "cluster='chuc'"]},
-        {"slot": "2/3", "site": "nancy", "options": ["-q", "production"]},
+    assert free_gpus.plan(found, count=8, slots=[1, 4, 6]) == [
+        {"slot": "1/8", "site": "lille", "options": ["-p", "cluster='chuc'"]},
+        {"slot": "4/8", "site": "lille", "options": ["-p", "cluster='chuc'"]},
+        {"slot": "6/8", "site": "nancy", "options": ["-q", "production"]},
     ]
 
 
+def test_plan_stops_when_the_free_slots_or_the_free_gpus_end():
+    found = {"lille": [{"cluster": "chuc", "free": 3, "options": []}]}
+    assert [s["slot"] for s in free_gpus.plan(found, count=4, slots=[2])] == ["2/4"]
+    assert len(free_gpus.plan(found, count=9, slots=list(range(9)))) == 3
+
+
 def test_plan_with_no_free_gpu_is_empty():
-    assert free_gpus.plan({"lille": []}) == []
+    assert free_gpus.plan({"lille": []}, count=4, slots=[0, 1]) == []
 
 
 def test_plan_command_reads_the_sites_and_prints_one_slot_per_line(tmp_path):
     site = tmp_path / "lille.jsonl"
-    site.write_text(json.dumps({"cluster": "chuc", "free": 1, "options": ["-p", "x"]}) + "\n")
-    out = subprocess.run(  # noqa: S603 - fixed command
-        [sys.executable, str(SCRIPT), "plan", str(site)], capture_output=True, text=True, check=True
-    ).stdout
-    assert [json.loads(line) for line in out.splitlines()] == [
-        {"slot": "0/1", "site": "lille", "options": ["-p", "x"]}
-    ]
+    site.write_text(json.dumps({"cluster": "chuc", "free": 2, "options": ["-p", "x"]}) + "\n")
+    command = [sys.executable, str(SCRIPT), "plan", "4", "1,3", str(site)]
+    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout  # noqa: S603
+    assert [json.loads(line)["slot"] for line in out.splitlines()] == ["1/4", "3/4"]
+
+
+def test_plan_command_with_no_free_slot_prints_nothing(tmp_path):
+    site = tmp_path / "lille.jsonl"
+    site.write_text(json.dumps({"cluster": "chuc", "free": 2, "options": []}) + "\n")
+    command = [sys.executable, str(SCRIPT), "plan", "4", "", str(site)]
+    assert subprocess.run(command, capture_output=True, text=True, check=True).stdout == ""  # noqa: S603
 
 
 def test_the_job_scripts_are_valid_bash():

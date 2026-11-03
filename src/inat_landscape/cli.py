@@ -180,6 +180,12 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         help="stop after this many photos, to restart the process fresh (default: no limit)",
     )
     p.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help="stop after the batch that passes this time, and save it (default: no limit)",
+    )
+    p.add_argument(
         "--download-batch",
         type=int,
         default=512,
@@ -285,7 +291,9 @@ def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
         deps.encoder(args.model, args.batch_size, args.compile),
         deps.hub(args.repo_id, args.offline),
         fetcher=fetcher,
-        options=EmbedOptions(args.chunk, args.worker, args.download_batch, args.max_photos),
+        options=EmbedOptions(
+            args.chunk, args.worker, args.download_batch, args.max_photos, args.max_seconds
+        ),
     )
     print(" ".join(f"{k}={v}" for k, v in vars(report).items()))
 

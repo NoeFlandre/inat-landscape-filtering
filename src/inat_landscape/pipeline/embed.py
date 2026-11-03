@@ -1,8 +1,11 @@
 """Embed stage: download the small photos and store one SigLIP embedding per photo."""
 
 import logging
+import math
+import os
 import queue
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -24,7 +27,8 @@ from inat_landscape.pipeline.sample import SAMPLE
 
 _LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
-_DECODE_THREADS = 4
+# Decode and resize threads: the cores of the job, at most 16 (a GPU job has a share of a node).
+_DECODE_THREADS = min(16, os.process_cpu_count() or 4)
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
 _FAILURE_SCHEMA = pa.schema(
@@ -123,6 +127,7 @@ class EmbedOptions:
     worker: tuple[int, int] = (0, 1)  # this worker and the worker count
     download_batch: int = 512  # photos downloaded and decoded ahead of the model, per batch
     max_photos: int | None = None  # stop after this many photos (a supervisor restarts the run)
+    max_seconds: float | None = None  # stop after the batch that passes this time (job walltime)
 
 
 def run_embed(
@@ -139,6 +144,7 @@ def run_embed(
     work = _work(workdir, encoder.model_id, hub, worker)
     shard = _Shard(work.store, chunk)
     todo = work.todo[: options.max_photos]
+    deadline = _deadline(options.max_seconds)
     embedded = failed = 0
     for part, ids, images, bad in _prefetched(todo, fetcher, min(chunk, options.download_batch)):
         if ids:
@@ -146,6 +152,9 @@ def run_embed(
         embedded, failed = embedded + len(ids), failed + len(bad)
         _record_failures(workdir / failures_name(worker), work.failures, part, bad)
         _LOG.info("embedded %d/%d, failed %d", embedded, len(todo), failed)
+        if time.monotonic() >= deadline:
+            _LOG.info("time limit reached: the next job continues")
+            break
     shard.flush()
     return EmbedReport(
         total=len(work.ids),
@@ -154,6 +163,11 @@ def run_embed(
         embedded=embedded,
         failed=failed,
     )
+
+
+def _deadline(max_seconds: float | None) -> float:
+    """Return the monotonic time after which the run stops (infinite with no limit)."""
+    return math.inf if max_seconds is None else time.monotonic() + max_seconds
 
 
 def _permanent(failures: dict[int, dict]) -> set[int]:

@@ -6,6 +6,8 @@
 # left and the previous job made progress, each job queues the next job of its slot, with
 # the same oarsub options. So one submission runs the slot to the end.
 set -euo pipefail
+START="${START:-$(date +%s)}"  # the job start: the walltime is 1 hour from here
+export START
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
 WORKER="${1:?usage: embed.oar I/N}"  # this worker slot and the global worker count
@@ -51,20 +53,32 @@ todo="$(run embed --worker "$WORKER" --plan | sed -n 's/^todo=//p')"
 last="$(cat "$KEEP/todo" 2>/dev/null || echo)"
 echo "worker $WORKER: ${todo:-?} photos left (previous job: ${last:-none})"
 echo "${todo:-0}" > "$KEEP/todo"
-[ "${todo:-0}" -gt 0 ] || exit 0
+if [ "${todo:-0}" -eq 0 ]; then
+    touch "$KEEP/done"  # submit_all.sh does not start this slot again
+    exit 0
+fi
 if [ -n "$last" ] && [ "$todo" -ge "$last" ]; then
     echo "no progress since the previous job: the chain stops" >&2
     exit 1
 fi
-# Queue the next 1-hour job of this slot. It starts after this one ends, and it stops at
-# once when no photo is left. So the chain ends by itself.
+# Shards of 200,000 photos (about 300 MB, 10 to 20 minutes of work): few commits on the hub.
+# Stop 6 minutes before the walltime, after a batch, so the last shard is saved.
+left=$((START + 3600 - 360 - $(date +%s)))
+run embed --worker "$WORKER" --chunk 200000 --batch-size 256 --concurrency 128 --download-batch 4096 \
+    --max-seconds "$left"
+save_failures
+# The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
+if [ "${WORKER#*/}" = 1 ]; then
+    run state push
+    exit 0
+fi
+# Queue the next 1-hour job of this slot now, a few minutes before the end of this job. It
+# starts when this job ends, less than 10 minutes after its submission, so it does not count
+# in the daytime quota (usage policy). It stops at once when no photo is left.
 # The nodes have no OAR commands: the job submits through the frontend of its site.
 mapfile -t options < "$KEEP/oarsub.options"
 next=(oarsub -a "$OAR_JOB_ID" -n "inat-embed-$SLOT" "${options[@]}" -l "gpu=1,walltime=1:00:00"
     -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err"
     "$REPO_DIR/scripts/g5k/embed.oar $WORKER")
 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "frontend.$(hostname -d)" "${next[*]@Q}" \
-    || echo "could not queue the next job: run scripts/g5k/submit.sh $WORKER again" >&2
-run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64 --download-batch 2048
-# The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
-if [ "${WORKER#*/}" = 1 ]; then run state push; fi
+    || echo "could not queue the next job: scripts/g5k/submit_all.sh starts the slot again" >&2

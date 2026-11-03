@@ -207,3 +207,11 @@ def test_a_worker_tags_its_shards_and_reads_no_other_tagged_shard(setup):
     assert names
     assert all(n.startswith("part-w1of2-") for n in names)
     assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 1  # 102 only
+
+
+def test_max_seconds_stops_after_the_current_batch_and_saves_it(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    report = _embed(workdir, hub, FakeEncoder(), max_seconds=0.0, download_batch=1)
+    assert report.embedded == 1
+    assert plan_embed(workdir, FakeEncoder.model_id, hub) == 3

@@ -4,7 +4,7 @@
 Standard library only: it runs on the frontends, which do not have the project environment.
 
     python3 free_gpus.py                    # on a frontend: free GPUs per cluster (JSON lines)
-    python3 free_gpus.py plan SITE.jsonl…   # one slot I/N per free GPU, with one global N
+    python3 free_gpus.py plan N SLOTS SITE.jsonl…   # give free slots of N (SLOTS: 1,4,…) to GPUs
 """
 
 import json
@@ -53,8 +53,8 @@ def _options(core: dict) -> list[str]:
     return [*options, "-p", f"cluster='{core['cluster']}'"]
 
 
-def plan(found: dict[str, list[dict]]) -> list[dict]:
-    """Give each free GPU of each site one slot I/N. N is the count of all free GPUs."""
+def plan(found: dict[str, list[dict]], *, count: int, slots: list[int]) -> list[dict]:
+    """Give the free `slots` of `count` worker slots to the free GPUs, one slot each."""
     seats = [
         (site, entry["options"])
         for site, entries in found.items()
@@ -62,8 +62,8 @@ def plan(found: dict[str, list[dict]]) -> list[dict]:
         for _ in range(entry["free"])
     ]
     return [
-        {"slot": f"{i}/{len(seats)}", "site": site, "options": options}
-        for i, (site, options) in enumerate(seats)
+        {"slot": f"{slot}/{count}", "site": site, "options": options}
+        for slot, (site, options) in zip(slots, seats, strict=False)
     ]
 
 
@@ -75,11 +75,12 @@ def _oar_cores() -> list[dict]:
 
 def main(argv: list[str]) -> None:
     if argv[:1] == ["plan"]:
+        count, slots = int(argv[1]), [int(s) for s in argv[2].split(",") if s]
         found = {
             Path(p).stem: [json.loads(line) for line in Path(p).read_text().splitlines() if line]
-            for p in argv[1:]
+            for p in argv[3:]
         }
-        lines = plan(found)
+        lines = plan(found, count=count, slots=slots)
     else:
         lines = clusters(_oar_cores())
     for line in lines:

@@ -19,7 +19,7 @@ if oarstat -u -f -J 2>/dev/null | grep -q "\"name\" *: *\"inat-embed-$slot\""; t
     exit 1
 fi
 mkdir -p "$keep" "$HOME/.inat-landscape/logs"
-rm -f "$keep/todo"
+rm -f "$keep/todo" "$keep/done"
 submit() {
     printf '%s\n' "$@" > "$keep/oarsub.options"
     oarsub -n "inat-embed-$slot" "$@" -l "gpu=1,walltime=1:00:00" \
