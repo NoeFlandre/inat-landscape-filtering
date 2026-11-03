@@ -19,8 +19,24 @@ if oarstat -u -f -J 2>/dev/null | grep -q "\"name\" *: *\"inat-embed-$slot\""; t
     exit 1
 fi
 mkdir -p "$keep" "$HOME/.inat-landscape/logs"
-printf '%s\n' "$@" > "$keep/oarsub.options"
 rm -f "$keep/todo"
-oarsub -n "inat-embed-$slot" "$@" -l "gpu=1,walltime=1:00:00" \
-    -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err" \
-    "$PWD/scripts/g5k/embed.oar $worker"
+submit() {
+    printf '%s\n' "$@" > "$keep/oarsub.options"
+    oarsub -n "inat-embed-$slot" "$@" -l "gpu=1,walltime=1:00:00" \
+        -O "$HOME/.inat-landscape/logs/%jobid%.out" -E "$HOME/.inat-landscape/logs/%jobid%.err" \
+        "$PWD/scripts/g5k/embed.oar $worker" 2>&1
+}
+# Some production clusters admit a user only in the besteffort queue. Besteffort jobs can
+# stop early; the next job of the chain continues the work.
+out="$(submit "$@")" || true
+if ! grep -q OAR_JOB_ID= <<< "$out"; then
+    echo "$out"
+    grep -q "only access the required resources in besteffort" <<< "$out" || exit 1
+    args=("$@")
+    for i in "${!args[@]}"; do
+        if [ "${args[$i]}" = production ]; then args[i]=besteffort; fi
+    done
+    out="$(submit "${args[@]}")" || true
+fi
+echo "$out"
+grep -q OAR_JOB_ID= <<< "$out"
