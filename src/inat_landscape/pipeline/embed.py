@@ -20,7 +20,7 @@ from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.adapters.images import Fetched, decode, fetch
 from inat_landscape.adapters.inat_dump import PHOTO_URL
-from inat_landscape.domain.sampling import for_worker
+from inat_landscape.domain.sampling import Slots, in_slots
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
@@ -31,6 +31,7 @@ HUB_DIR = "hub"
 _DECODE_THREADS = min(16, os.process_cpu_count() or 4)
 FAILURES = "failures.parquet"
 SCORING_SIZE = "small"
+ONE_WORKER = Slots(0, 1, 1)  # all the photos
 _FAILURE_SCHEMA = pa.schema(
     [
         ("photo_id", pa.int64()),
@@ -69,10 +70,12 @@ def open_store(workdir: Path, model_id: str, hub: Hub, *, tag: str = "") -> Embe
     return store
 
 
-def worker_tag(worker: tuple[int, int]) -> str:
-    """Return the shard tag of a worker slot: `w1of4`, or no tag for a single worker."""
-    index, count = worker
-    return f"w{index}of{count}" if count > 1 else ""
+def worker_tag(worker: Slots) -> str:
+    """Return the shard tag of a slot range: `w1of4`, `w1-3of40`, or none for one worker."""
+    if worker.count == 1:
+        return ""
+    span = f"{worker.start}" if worker.stop == worker.start + 1 else f"{worker.start}-{worker.stop}"
+    return f"w{span}of{worker.count}"
 
 
 def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
@@ -98,16 +101,15 @@ class _Work:
     todo: list[dict]
 
 
-def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _Work:
+def _work(workdir: Path, model_id: str, hub: Hub, worker: Slots) -> _Work:
     """Return the photos of `worker` and which of them still need an embedding."""
     sample = read_sample(workdir, columns=["photo_id", "extension"])  # small, for parallel workers
-    mine = [for_worker(i, *worker) for i in sample["photo_id"].to_pylist()]
-    sample = sample.filter(pa.array(mine, pa.bool_()))
+    sample = sample.filter(pa.array(in_slots(sample["photo_id"].to_numpy(), worker)))
     store = open_store(workdir, model_id, hub, tag=worker_tag(worker))
     done = store.remote_ids() | store.done_ids()
     failures = _read_failures(workdir / failures_name(worker))
     # The shared failure file (from `state pull`) also lists the known permanent failures.
-    shared = _read_failures(workdir / FAILURES) if worker[1] > 1 else {}
+    shared = _read_failures(workdir / FAILURES) if worker.count > 1 else {}
     permanent = (_permanent(failures) | _permanent(shared)) - done
     rows = sample.select(["photo_id", "extension"]).to_pylist()
     return _Work(
@@ -120,7 +122,7 @@ def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _W
     )
 
 
-def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: tuple[int, int] = (0, 1)) -> int:
+def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: Slots = ONE_WORKER) -> int:
     """Return how many photos of `worker` still need an embedding. Loads no model."""
     return len(_work(workdir, model_id, hub, worker).todo)
 
@@ -130,7 +132,7 @@ class EmbedOptions:
     """How one embed run splits and batches its work."""
 
     chunk: int = 1000  # photos per shard
-    worker: tuple[int, int] = (0, 1)  # this worker and the worker count
+    worker: Slots = ONE_WORKER  # the slot range of this worker
     download_batch: int = 512  # photos downloaded and decoded ahead of the model, per batch
     max_photos: int | None = None  # stop after this many photos (a supervisor restarts the run)
     max_seconds: float | None = None  # stop after the batch that passes this time (job walltime)
@@ -144,7 +146,7 @@ def run_embed(
     fetcher: Fetcher = fetch,
     options: EmbedOptions = EmbedOptions(),  # noqa: B008 - frozen dataclass, shared safely
 ) -> EmbedReport:
-    """Embed every sampled photo of `worker` (index, count) with no embedding and no permanent
+    """Embed every sampled photo of the slots of `worker` with no embedding and no permanent
     failure. Parallel workers on other machines share the work through the hub shards."""
     chunk, worker = options.chunk, options.worker
     work = _work(workdir, encoder.model_id, hub, worker)
@@ -271,10 +273,11 @@ def _failure(result: Fetched) -> dict:
     }
 
 
-def failures_name(worker: tuple[int, int]) -> str:
+def failures_name(worker: Slots) -> str:
     """Return the failure file of a worker: one file each, as parallel workers share a folder."""
-    index, count = worker
-    return FAILURES if count == 1 else f"failures-{index}-of-{count}.parquet"
+    if worker.count == 1:
+        return FAILURES
+    return f"failures-{worker_tag(worker)[1:].replace('of', '-of-')}.parquet"
 
 
 def _read_failures(path: Path) -> dict[int, dict]:

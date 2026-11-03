@@ -8,6 +8,7 @@ with its own. The other slots of its count cannot overlap, so their shards are n
 """
 
 import hashlib
+import re
 import shutil
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -18,6 +19,7 @@ import pyarrow.parquet as pq
 
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
+from inat_landscape.domain.sampling import Slots
 
 
 class EmbeddingStore:
@@ -55,12 +57,12 @@ class EmbeddingStore:
         }
 
     def _mine(self, path: str) -> bool:
-        """Tell if a shard can hold photos of this tag: untagged, this tag, or another count."""
+        """Tell if a shard can hold photos of this tag: untagged, or a slot range (or another
+        worker count) that overlaps this one."""
         name = path.rsplit("/", 1)[-1]
-        if not self.tag or not name.startswith("part-w"):
-            return True
-        tag = name.removeprefix("part-").split("-", 1)[0]
-        return tag == self.tag or tag.split("of")[-1] != self.tag.split("of")[-1]
+        own = _tag_slots(self.tag)
+        other = _tag_slots(name.removeprefix("part-").split("-of")[0].rsplit("-", 1)[0])
+        return own is None or other is None or own.overlaps(other)
 
     def stream(self) -> Iterator[tuple[list[int], np.ndarray]]:
         """Yield the ids and float16 embeddings of each shard, one shard at a time.
@@ -102,3 +104,12 @@ class EmbeddingStore:
 
     def _shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))
+
+
+def _tag_slots(tag: str) -> Slots | None:
+    """Return the slots of a shard tag (`w3of9`, `w3-6of9`), or None for no tag."""
+    match = re.fullmatch(r"w(\d+)(?:-(\d+))?of(\d+)", tag)
+    if match is None:
+        return None
+    start, stop, count = match.groups()
+    return Slots(int(start), int(stop) if stop else int(start) + 1, int(count))

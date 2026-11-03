@@ -6,6 +6,7 @@ from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.hub import OfflineHub
 from inat_landscape.adapters.images import fetch
+from inat_landscape.domain.sampling import Slots
 from inat_landscape.pipeline.embed import (
     FAILURES,
     HUB_DIR,
@@ -131,8 +132,8 @@ def test_workers_split_the_photos_without_overlap(setup, tmp_path):
     serve_photos(handler)
     other = tmp_path / "other"
     prepared(other)
-    assert _embed(workdir, hub, FakeEncoder(), worker=(0, 2)).embedded == 1  # 102
-    assert _embed(other, hub, FakeEncoder(), worker=(1, 2)).embedded == 3  # 101, 103, 107
+    assert _embed(workdir, hub, FakeEncoder(), worker=Slots(0, 1, 2)).embedded == 1  # 102
+    assert _embed(other, hub, FakeEncoder(), worker=Slots(1, 2, 2)).embedded == 3  # 101, 103, 107
     encoder = FakeEncoder()
     assert _embed(workdir, hub, encoder).already == 4
     assert encoder.image_calls == 0
@@ -141,9 +142,9 @@ def test_workers_split_the_photos_without_overlap(setup, tmp_path):
 def test_plan_counts_the_work_left_without_the_model(setup):
     workdir, handler, hub = setup
     serve_photos(handler)
-    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(1, 2)) == 3
-    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))
-    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(1, 2)) == 0
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=Slots(1, 2, 2)) == 3
+    _embed(workdir, hub, FakeEncoder(), worker=Slots(1, 2, 2))
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=Slots(1, 2, 2)) == 0
     assert plan_embed(workdir, FakeEncoder.model_id, hub) == 1
 
 
@@ -171,8 +172,8 @@ def test_a_download_error_stops_the_run(setup):
 def test_parallel_workers_keep_separate_failure_files(setup):
     workdir, handler, hub = setup
     serve_photos(handler, skip=(101, 102))
-    _embed(workdir, hub, FakeEncoder(), worker=(0, 2))  # 102 fails
-    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))  # 101 fails
+    _embed(workdir, hub, FakeEncoder(), worker=Slots(0, 1, 2))  # 102 fails
+    _embed(workdir, hub, FakeEncoder(), worker=Slots(1, 2, 2))  # 101 fails
     zero = read_table(workdir / "failures-0-of-2.parquet")["photo_id"].to_pylist()
     one = read_table(workdir / "failures-1-of-2.parquet")["photo_id"].to_pylist()
     assert (zero, one) == ([102], [101])
@@ -195,19 +196,19 @@ def test_workers_skip_the_permanent_failures_of_the_shared_failure_file(setup):
     serve_photos(handler, skip=(102,))
     _embed(workdir, hub, FakeEncoder())  # one worker: 102 goes to the shared failure file
     (workdir / "failures-0-of-2.parquet").unlink(missing_ok=True)
-    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 0
-    report = _embed(workdir, hub, FakeEncoder(), worker=(0, 2))
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=Slots(0, 1, 2)) == 0
+    report = _embed(workdir, hub, FakeEncoder(), worker=Slots(0, 1, 2))
     assert (report.embedded, report.failed, report.skipped) == (0, 0, 1)
 
 
 def test_a_worker_tags_its_shards_and_reads_no_other_tagged_shard(setup):
     workdir, handler, hub = setup
     serve_photos(handler)
-    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))
+    _embed(workdir, hub, FakeEncoder(), worker=Slots(1, 2, 2))
     names = [p.rsplit("/", 1)[-1] for p in hub.list_files("embeddings/")]
     assert names
     assert all(n.startswith("part-w1of2-") for n in names)
-    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 1  # 102 only
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=Slots(0, 1, 2)) == 1  # 102 only
 
 
 def test_max_seconds_stops_after_the_current_batch_and_saves_it(setup):
@@ -223,3 +224,13 @@ def test_embed_needs_only_the_sample_ids(setup):
     serve_photos(handler)
     (workdir / SAMPLE).unlink()  # a GPU job pulls sample-ids.parquet only
     assert _embed(workdir, hub, FakeEncoder()).embedded == 4
+
+
+def test_a_slot_range_embeds_the_photos_of_all_its_slots(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    report = _embed(workdir, hub, FakeEncoder(), worker=Slots(1, 3, 3))
+    assert report.total == 3  # 101 (mod 3 = 2), 103 (1), 107 (2); 102 is slot 0
+    names = [p.rsplit("/", 1)[-1] for p in hub.list_files("embeddings/")]
+    assert all(n.startswith("part-w1-3of3-") for n in names)
+    assert (workdir / "failures-1-3-of-3.parquet").exists() or report.failed == 0

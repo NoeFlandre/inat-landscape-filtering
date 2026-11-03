@@ -27,7 +27,7 @@ trap 'rm -rf "$tmp"' EXIT
 for site in "${sites[@]}"; do
     ssh "$site" test -s .hf_token || { echo "$site has no ~/.hf_token" >&2; exit 1; }
     # Slots with a queued or running job, and slots that are done.
-    ssh "$site" "oarstat -u -f -J 2>/dev/null | grep -o '\"name\" *: *\"inat-embed-[0-9]*-of-[0-9]*\"' | grep -o '[0-9]*-of-[0-9]*'; ls -d .inat-landscape/*-of-$count/done 2>/dev/null | grep -o '[0-9]*-of-[0-9]*'" >> "$tmp/busy" || true
+    ssh "$site" "oarstat -u -f -J 2>/dev/null | grep -oE '\"name\" *: *\"inat-embed-[0-9-]*-of-[0-9]+\"' | grep -oE '[0-9-]*-of-[0-9]+'; ls -d .inat-landscape/*-of-$count/done 2>/dev/null | grep -oE '[0-9-]*-of-[0-9]+'" >> "$tmp/busy" || true
     ssh "$site" python3 - < "$here/free_gpus.py" > "$tmp/$site.jsonl"
 done
 if grep -v -- "-of-$count\$" "$tmp/busy" | grep -q .; then
@@ -36,32 +36,29 @@ if grep -v -- "-of-$count\$" "$tmp/busy" | grep -q .; then
 fi
 free_slots="$(python3 -c '
 import sys
-busy = {int(line.split("-")[0]) for line in open(sys.argv[2]) if line.strip()}
+busy = set()
+for line in open(sys.argv[2]):  # 3-of-9 or 3-6-of-9 (slots 3 to 5)
+    if line.strip():
+        span = line.strip().rsplit("-of-", 1)[0].split("-")
+        busy.update(range(int(span[0]), int(span[-1]) + (len(span) == 1)))
 print(",".join(str(i) for i in range(int(sys.argv[1])) if i not in busy))
 ' "$count" "$tmp/busy")"
-python3 "$here/free_gpus.py" seats "$tmp"/*.jsonl > "$tmp/seats.jsonl"
-read -ra pending <<< "${free_slots//,/ }"
-echo "free slots: ${#pending[@]}, free GPUs: $(wc -l < "$tmp/seats.jsonl")"
-[ ${#pending[@]} -gt 0 ] && [ -s "$tmp/seats.jsonl" ] || exit 0
+python3 "$here/free_gpus.py" assign "$count" "$free_slots" "$tmp"/*.jsonl > "$tmp/plan.jsonl"
+echo "free slots: $(tr ',' '\n' <<< "$free_slots" | grep -c . || true), GPUs used: $(wc -l < "$tmp/plan.jsonl")"
+[ -s "$tmp/plan.jsonl" ] || exit 0
 
-for site in $(python3 -c 'import json,sys; print(*sorted({json.loads(l)["site"] for l in sys.stdin}))' < "$tmp/seats.jsonl"); do
+for site in $(python3 -c 'import json,sys; print(*sorted({json.loads(l)["site"] for l in sys.stdin}))' < "$tmp/plan.jsonl"); do
     ssh "$site" "if [ -d inat-landscape-filtering/.git ]; then git -C inat-landscape-filtering pull -q --ff-only; else git clone -q -b $branch $repo inat-landscape-filtering; fi"
 done
-# Give each free slot to a free GPU, on the site of the GPU, with the oarsub options of its
-# cluster. When OAR refuses a GPU (it can look free and still be refused), the slot goes to
-# the next GPU.
+# One chain for each run of slots, on the site of its GPU, with the oarsub options of its
+# cluster. A fast GPU owns more slots (its weight), so all slots advance at about one speed.
 python3 -c '
 import json, shlex, sys
 for line in sys.stdin:
     s = json.loads(line)
-    print(s["site"], " ".join(shlex.quote(a) for a in s["options"]))
-' < "$tmp/seats.jsonl" > "$tmp/seats.txt"
-while read -r site options; do
-    [ ${#pending[@]} -gt 0 ] || break
-    slot="${pending[0]}/$count"
-    command="cd inat-landscape-filtering && ./scripts/g5k/submit.sh $slot $options"
-    out="$(ssh -n "$site" "$command" 2>&1 | tail -1)" || true  # a refused GPU is not fatal
-    echo "$site $slot: $out"
-    if grep -q OAR_JOB_ID= <<< "$out"; then pending=("${pending[@]:1}"); fi
-done < "$tmp/seats.txt"
-echo "slots left without a GPU: ${#pending[@]}"
+    print(s["site"], s["slots"], " ".join(shlex.quote(a) for a in s["options"]))
+' < "$tmp/plan.jsonl" > "$tmp/plan.txt"
+while read -r site slots options; do
+    out="$(ssh -n "$site" "cd inat-landscape-filtering && ./scripts/g5k/submit.sh $slots $options" 2>&1 | tail -1)" || true
+    echo "$site $slots: $out"
+done < "$tmp/plan.txt"

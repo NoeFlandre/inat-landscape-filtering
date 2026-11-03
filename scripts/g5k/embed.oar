@@ -10,8 +10,8 @@ START="${START:-$(date +%s)}"  # the job start: the walltime is 1 hour from here
 export START
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
-WORKER="${1:?usage: embed.oar I/N}"  # this worker slot and the global worker count
-SLOT="${WORKER/\//-of-}"
+WORKER="${1:?usage: embed.oar I/N|I:J/N}"  # the slots of this chain, out of the worker count
+SLOT="$(sed "s#:#-#; s#/#-of-#" <<< "$WORKER")"  # 3/9 -> 3-of-9, 3:6/9 -> 3-6-of-9
 BASE="/tmp/inat-$USER-$SLOT"
 # Bash reads a script while it runs it. A `git pull` on the NFS /home replaces this file and
 # stops the job ("Stale file handle"). So the job runs a copy on the node /tmp.

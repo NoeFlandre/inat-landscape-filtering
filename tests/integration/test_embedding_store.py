@@ -97,3 +97,10 @@ def test_a_slot_reads_the_shards_of_another_worker_count(tmp_path, hub):
     # A new count N can start at any time: the work of the old count is seen, the work of
     # the other slots of the same count cannot overlap and is not read.
     assert EmbeddingStore(tmp_path / "d", DIR, hub, tag="w1of4").remote_ids() == {5, 7}
+
+
+def test_a_slot_range_reads_the_shards_of_the_ranges_it_overlaps(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub, tag="w0-2of9").add([1], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "b", DIR, hub, tag="w2-4of9").add([2], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "c", DIR, hub, tag="w3of9").add([3], np.ones((1, 2)))
+    assert EmbeddingStore(tmp_path / "d", DIR, hub, tag="w1-3of9").remote_ids() == {1, 2}

@@ -9,9 +9,9 @@
 #   for example: ./scripts/g5k/submit.sh 3/16 -q production -p "cluster='grue'"
 # The options select the GPUs (queue, job type, properties). The next jobs use them again.
 set -euo pipefail
-worker="${1:?usage: submit.sh I/N [oarsub options]}"
+worker="${1:?usage: submit.sh I/N|I:J/N [oarsub options]}"
 shift
-slot="${worker/\//-of-}"
+slot="$(sed "s#:#-#; s#/#-of-#" <<< "$worker")"  # 3/9 -> 3-of-9, 3:6/9 -> 3-6-of-9
 keep="$HOME/.inat-landscape/$slot"
 # One chain for each slot: do not start a second chain of the same slot on this site.
 if oarstat -u -f -J 2>/dev/null | grep -q "\"name\" *: *\"inat-embed-$slot\""; then

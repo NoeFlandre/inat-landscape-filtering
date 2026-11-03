@@ -10,8 +10,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from inat_landscape.domain.sampling import (
+    Slots,
     for_worker,
     in_sample,
+    in_slots,
     sample_prefix,
     uniform_order,
     uuid_key,
@@ -140,3 +142,50 @@ def test_each_photo_belongs_to_exactly_one_worker(photo_id, workers):
 def test_for_worker_rejects_bad_worker(worker, workers):
     with pytest.raises(ValueError, match="worker"):
         for_worker(1, worker, workers)
+
+
+@given(
+    st.lists(st.integers(0, 10**9), max_size=40),
+    st.integers(1, 30).flatmap(lambda n: st.tuples(st.just(n), st.integers(0, n - 1))),
+    st.integers(1, 5),
+)
+def test_a_slot_range_owns_the_photos_of_its_slots(ids, count_start, width):
+    count, start = count_start
+    stop = min(start + width, count)
+    got = in_slots(np.array(ids, dtype=np.int64), Slots(start, stop, count)).tolist()
+    assert got == [start <= i % count < stop for i in ids]
+
+
+def test_a_single_slot_is_the_old_worker_split():
+    ids = np.arange(20, dtype=np.int64)
+    assert in_slots(ids, Slots(3, 4, 7)).tolist() == [for_worker(i, 3, 7) for i in range(20)]
+
+
+@pytest.mark.parametrize(
+    ("raw", "slots"),
+    [("3/7", Slots(3, 4, 7)), ("2:5/40", Slots(2, 5, 40)), ("0/1", Slots(0, 1, 1))],
+)
+def test_slots_parse_and_print(raw, slots):
+    assert Slots.parse(raw) == slots
+    assert str(slots) == raw
+
+
+@pytest.mark.parametrize("raw", ["3", "5/4", "3:3/7", "2:9/7", "-1/3", "a/b", "4:2/9"])
+def test_bad_slots_are_rejected(raw):
+    with pytest.raises(ValueError, match="slots"):
+        Slots.parse(raw)
+
+
+def test_slot_ranges_of_the_same_count_overlap_only_when_they_share_a_slot():
+    assert Slots(0, 3, 9).overlaps(Slots(2, 5, 9))
+    assert not Slots(0, 3, 9).overlaps(Slots(3, 5, 9))
+    assert Slots(0, 1, 9).overlaps(Slots(4, 5, 7))  # another count: the photos can overlap
+
+
+def test_a_range_that_starts_where_the_other_ends_does_not_overlap_it():
+    assert not Slots(3, 5, 9).overlaps(Slots(0, 3, 9))
+
+
+def test_an_empty_range_cannot_be_made():
+    with pytest.raises(ValueError, match="slots must be I/N or I:J/N with 0 <= I < J <= N"):
+        Slots(3, 3, 7)

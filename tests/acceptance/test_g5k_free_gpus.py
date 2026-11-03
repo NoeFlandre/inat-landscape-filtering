@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 BASH = shutil.which("bash") or "/bin/bash"
 SCRIPT = Path(__file__).parents[2] / "scripts" / "g5k" / "free_gpus.py"
 _spec = importlib.util.spec_from_file_location("free_gpus", SCRIPT)
@@ -42,6 +44,7 @@ def test_a_gpu_is_free_when_no_core_of_it_has_a_job():
     [found] = free_gpus.clusters(cores)
     assert (found["cluster"], found["free"]) == ("chuc", 2)
     assert found["options"] == ["-p", "cluster='chuc'"]
+    assert found["weight"] == 7
 
 
 def test_cores_without_a_gpu_are_ignored():
@@ -134,6 +137,45 @@ def test_seats_lists_one_line_per_free_gpu(tmp_path):
     command = [sys.executable, str(SCRIPT), "seats", str(site)]
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout  # noqa: S603
     assert [json.loads(line) for line in out.splitlines()] == [
-        {"site": "lille", "options": ["-p", "x"]},
-        {"site": "lille", "options": ["-p", "x"]},
+        {"site": "lille", "options": ["-p", "x"], "weight": 1},
+        {"site": "lille", "options": ["-p", "x"], "weight": 1},
     ]
+
+
+@pytest.mark.parametrize(
+    ("model", "weight"),
+    [
+        ("A40", 7),
+        ("A100-SXM4-40GB", 7),
+        ("L4", 4),
+        ("Quadro RTX 8000", 5),
+        ("Quadro RTX 6000", 3),
+        ("RTX A5000", 2),
+        ("GeForce RTX 2080 Ti", 2),
+        ("Tesla T4", 2),
+        ("GeForce GTX 1080 Ti", 1),
+        ("Some Future GPU", 2),
+    ],
+)
+def test_weight_is_the_speed_in_units_of_about_120_photos_per_second(model, weight):
+    assert free_gpus.weight(model) == weight
+
+
+def test_clusters_carry_the_weight_of_their_gpu_model():
+    [found] = free_gpus.clusters([_core("chuc1", 1, model="A100-SXM4-40GB")])
+    assert found["weight"] == 7
+
+
+def test_assign_gives_each_gpu_a_run_of_free_slots_as_long_as_its_weight():
+    seats = [("lille", ["-p", "a"], 3), ("nancy", ["-p", "b"], 2), ("rennes", [], 1)]
+    assert free_gpus.assign(seats, count=10, free=[0, 1, 2, 3, 4, 7, 8]) == [
+        {"site": "lille", "slots": "0:3/10", "options": ["-p", "a"]},
+        {"site": "nancy", "slots": "3:5/10", "options": ["-p", "b"]},
+        {"site": "rennes", "slots": "7/10", "options": []},
+    ]
+
+
+def test_assign_never_joins_slots_that_are_not_next_to_each_other():
+    seats = [("lille", [], 4), ("nancy", [], 4)]
+    got = free_gpus.assign(seats, count=10, free=[1, 2, 5, 6, 7])
+    assert [s["slots"] for s in got] == ["1:3/10", "5:8/10"]

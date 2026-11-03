@@ -19,6 +19,7 @@ from huggingface_hub.errors import HfHubHTTPError
 from inat_landscape.adapters.hub import REPO_ID, STATE_REPO_ID, HfHub, Hub, OfflineHub
 from inat_landscape.adapters.images import Fetched, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
+from inat_landscape.domain.sampling import Slots
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
@@ -72,14 +73,11 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     return 0
 
 
-def _worker(raw: str) -> tuple[int, int]:
+def _worker(raw: str) -> Slots:
     try:
-        worker, workers = (int(part) for part in raw.split("/"))
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"worker must be I/N, got {raw!r}") from None
-    if not 0 <= worker < workers:
-        raise argparse.ArgumentTypeError(f"worker must be in [0, {workers}), got {worker}")
-    return worker, workers
+        return Slots.parse(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _caps(raw: str) -> tuple[int, ...]:
@@ -222,7 +220,7 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         "--worker",
         type=_worker,
         default=(0, 1),
-        help="this worker and the worker count, as I/N (default: 0/1)",
+        help="the slots of this worker: I/N, or I:J/N for slots I to J-1 (default: 0/1)",
     )
     p.add_argument(
         "--concurrency", type=int, default=32, help="parallel photo downloads (default: 32)"

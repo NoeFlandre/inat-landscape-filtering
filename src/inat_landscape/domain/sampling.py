@@ -4,6 +4,8 @@ An observation is in the sample when the first 8 hex digits of its UUID are belo
 prefix derived from the sample fraction. A larger fraction always keeps a superset.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -67,3 +69,45 @@ def for_worker(photo_id: int, worker: int, workers: int) -> bool:
     if not 0 <= worker < workers:
         raise ValueError(f"worker must be in [0, {workers}), got {worker}")
     return photo_id % workers == worker
+
+
+@dataclass(frozen=True)
+class Slots:
+    """A contiguous range of worker slots [start, stop) out of `count`.
+
+    A job owns a range: a fast GPU owns more slots than a slow one, so all slots advance at
+    about the same speed and the layers of the uniform order stay complete (ADR 0011).
+    """
+
+    start: int
+    stop: int
+    count: int
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.start < self.stop <= self.count:
+            raise ValueError(f"slots must be I/N or I:J/N with 0 <= I < J <= N, got {self}")
+
+    @classmethod
+    def parse(cls, raw: str) -> "Slots":
+        """Read `I/N` (one slot) or `I:J/N` (slots I to J-1)."""
+        try:
+            span, count = raw.split("/")
+            first, _, last = span.partition(":")
+            start = int(first)
+            return cls(start, int(last) if last else start + 1, int(count))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"slots must be I/N or I:J/N, got {raw!r}") from exc
+
+    def __str__(self) -> str:
+        span = f"{self.start}" if self.stop == self.start + 1 else f"{self.start}:{self.stop}"
+        return f"{span}/{self.count}"
+
+    def overlaps(self, other: "Slots") -> bool:
+        """Tell if two ranges can own the same photo: a shared slot, or another count."""
+        return other.count != self.count or (self.start < other.stop and other.start < self.stop)
+
+
+def in_slots(photo_ids: NDArray[np.int64], slots: Slots) -> NDArray[np.bool_]:
+    """Tell which photos belong to the range of slots (photo_id mod count in the range)."""
+    rest = photo_ids % slots.count
+    return (rest >= slots.start) & (rest < slots.stop)
