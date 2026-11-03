@@ -23,7 +23,7 @@ from inat_landscape.adapters.inat_dump import PHOTO_URL
 from inat_landscape.domain.sampling import for_worker
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ports import Encoder, Fetcher
-from inat_landscape.pipeline.sample import SAMPLE
+from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
 
 _LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
@@ -76,7 +76,13 @@ def worker_tag(worker: tuple[int, int]) -> str:
 
 
 def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
-    """Return the sample table, or fail if the sample stage did not run."""
+    """Return the sample table, or fail if the sample stage did not run.
+
+    For the photo ids and extensions only, the small `sample-ids.parquet` is enough.
+    """
+    slim = workdir / SAMPLE_IDS
+    if columns and set(columns) <= {"photo_id", "extension"} and slim.exists():
+        return read_table(slim, columns)
     if not (workdir / SAMPLE).exists():
         raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
     return read_table(workdir / SAMPLE, columns)

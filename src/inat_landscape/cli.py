@@ -29,7 +29,7 @@ from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.sample import run_sample
 from inat_landscape.pipeline.score import SCORE, run_score
-from inat_landscape.pipeline.state import pull_state, push_state
+from inat_landscape.pipeline.state import STATE_FILES, pull_state, push_state
 from inat_landscape.pipeline.status import run_status
 
 _ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, urllib.error.URLError, OSError)
@@ -109,6 +109,12 @@ def _parser() -> argparse.ArgumentParser:
     _add_publish(sub)
     state = sub.add_parser("state", help="push or pull the work files to a private hub repo")
     state.add_argument("action", choices=("push", "pull"), help="direction of the transfer")
+    state.add_argument(
+        "--only",
+        type=lambda raw: [name for name in raw.split(",") if name],
+        default=None,
+        help="pull only these state files, comma-separated (default: all)",
+    )
     state.add_argument(
         "--state-repo",
         default=STATE_REPO_ID,
@@ -325,8 +331,10 @@ def _publish(args: argparse.Namespace, deps: Deps) -> None:
 
 def _state(args: argparse.Namespace, deps: Deps) -> None:
     hub = deps.hub(args.state_repo, False, True)
-    move = push_state if args.action == "push" else pull_state
-    print(" ".join(move(args.workdir, hub)))
+    if args.action == "push":
+        print(" ".join(push_state(args.workdir, hub)))
+    else:
+        print(" ".join(pull_state(args.workdir, hub, only=args.only or STATE_FILES)))
 
 
 def _status(args: argparse.Namespace, _deps: Deps) -> None:

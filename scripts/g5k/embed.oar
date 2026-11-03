@@ -43,7 +43,7 @@ uv sync --locked --no-default-groups --group cu126 -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-run state pull
+run state pull --only sample-ids.parquet,failures.parquet  # about 1 GB, not the full sample
 # Keep the failure file of the slot on /home, so the next job does not try the same photos.
 [ -f "$KEEP/$FAILS" ] && cp "$KEEP/$FAILS" "$WORK/$FAILS"
 save_failures() { [ -f "$WORK/$FAILS" ] && cp "$WORK/$FAILS" "$KEEP/$FAILS" || true; }

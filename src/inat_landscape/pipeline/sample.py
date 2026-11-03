@@ -12,8 +12,9 @@ from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES
 
 SAMPLE = "sample.parquet"
+SAMPLE_IDS = "sample-ids.parquet"  # photo_id and extension only: all that the embed jobs read
 
-__all__ = ["SAMPLE", "StageError", "run_sample"]
+__all__ = ["SAMPLE", "SAMPLE_IDS", "StageError", "run_sample"]
 
 
 def run_sample(workdir: Path, n: int | None) -> pa.Table:
@@ -38,6 +39,7 @@ def run_sample(workdir: Path, n: int | None) -> pa.Table:
     sample = sample.append_column("cell_rank", pa.array(ranks[where]))
     sample = sample.sort_by("sample_rank")
     write_table(sample, workdir / SAMPLE)
+    write_table(sample.select(["photo_id", "extension"]), workdir / SAMPLE_IDS)
     return sample
 
 

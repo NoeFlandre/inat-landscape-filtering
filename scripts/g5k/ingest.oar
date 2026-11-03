@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
-CAP="${1:?usage: ingest.oar CAP}"
+CAP="${1:?usage: ingest.oar CAP|sample}"
 BASE="/tmp/inat-$USER-ingest"
 # A copy on the node /tmp: a `git pull` on the NFS /home does not stop the job.
 if [ "$0" != "$BASE/ingest.oar" ]; then
@@ -32,11 +32,16 @@ cd "$REPO_DIR"
 uv sync --locked -q
 run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
 
-# Keep only the failure file of the earlier runs: the old candidates have another taxa scope.
-uv run --no-sync inat-landscape --workdir "$BASE/old" state pull
-cp "$BASE/old/failures.parquet" "$WORK/" 2>/dev/null || true
-run measure --cap "$CAP" --caps "10,50,100,300,1000"
-run ingest --cap "$CAP"
+if [ "$CAP" = sample ]; then
+    # Only the sample again, from the candidates of the state (for example with a new order).
+    run state pull --only ingest/manifest.json,ingest/candidates.parquet,failures.parquet
+else
+    # Keep only the failure file of the earlier runs: old candidates can have another scope.
+    uv run --no-sync inat-landscape --workdir "$BASE/old" state pull --only failures.parquet
+    cp "$BASE/old/failures.parquet" "$WORK/" 2>/dev/null || true
+    run measure --cap "$CAP" --caps "10,50,100,300,1000"
+    run ingest --cap "$CAP"
+fi
 run sample
 run status
 run state push

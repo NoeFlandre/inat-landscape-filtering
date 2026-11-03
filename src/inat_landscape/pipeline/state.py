@@ -4,6 +4,7 @@ The state goes under `state/` in a private repository, apart from the public dat
 Embeddings are not part of it: they already live in the public dataset.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from inat_landscape.adapters.hub import Hub
@@ -13,6 +14,7 @@ STATE_FILES = (
     "ingest/manifest.json",
     "ingest/candidates.parquet",
     "sample.parquet",
+    "sample-ids.parquet",
     "scored.parquet",
     "failures.parquet",
 )
@@ -29,18 +31,25 @@ def push_state(workdir: Path, hub: Hub) -> list[str]:
     return present
 
 
-def pull_state(workdir: Path, hub: Hub) -> list[str]:
-    """Download the state files of the hub into the work directory. Return their names."""
-    names = _remote_state(hub)
+def pull_state(workdir: Path, hub: Hub, *, only: Sequence[str] = STATE_FILES) -> list[str]:
+    """Download the state files of the hub (or the files of `only`) into the work directory.
+
+    Return their names.
+    """
+    names = [n for n in _remote_state(hub) if n in only]
     if not names:
         raise StageError("no state on the hub: run `state push` first")
-    staging = workdir / ".state"
     for name in names:
-        hub.download(_PREFIX + name, staging)
-        target = workdir / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        (staging / _PREFIX / name).replace(target)
+        _pull_one(workdir, hub, name)
     return names
+
+
+def _pull_one(workdir: Path, hub: Hub, name: str) -> None:
+    staging = workdir / ".state"
+    hub.download(_PREFIX + name, staging)
+    target = workdir / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    (staging / _PREFIX / name).replace(target)
 
 
 def _remote_state(hub: Hub) -> list[str]:

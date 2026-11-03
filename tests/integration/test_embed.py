@@ -15,6 +15,7 @@ from inat_landscape.pipeline.embed import (
     run_embed,
 )
 from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.sample import SAMPLE
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
 
@@ -215,3 +216,10 @@ def test_max_seconds_stops_after_the_current_batch_and_saves_it(setup):
     report = _embed(workdir, hub, FakeEncoder(), max_seconds=0.0, download_batch=1)
     assert report.embedded == 1
     assert plan_embed(workdir, FakeEncoder.model_id, hub) == 3
+
+
+def test_embed_needs_only_the_sample_ids(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    (workdir / SAMPLE).unlink()  # a GPU job pulls sample-ids.parquet only
+    assert _embed(workdir, hub, FakeEncoder()).embedded == 4

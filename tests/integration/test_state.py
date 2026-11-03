@@ -40,6 +40,20 @@ def test_state_files_cover_the_hand_off_points():
         "ingest/manifest.json",
         "ingest/candidates.parquet",
         "sample.parquet",
+        "sample-ids.parquet",
         "scored.parquet",
         "failures.parquet",
     }
+
+
+def test_pull_only_some_files(tmp_path, hub):
+    src = tmp_path / "a"
+    src.mkdir()
+    (src / "sample.parquet").write_bytes(b"big")
+    (src / "sample-ids.parquet").write_bytes(b"small")
+    push_state(src, hub)
+    dst = tmp_path / "b"
+    assert pull_state(dst, hub, only=["sample-ids.parquet", "failures.parquet"]) == [
+        "sample-ids.parquet"
+    ]
+    assert not (dst / "sample.parquet").exists()

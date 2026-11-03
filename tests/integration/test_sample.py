@@ -4,8 +4,9 @@ import io
 
 import pytest
 
+from inat_landscape.adapters.files import read_table
 from inat_landscape.pipeline.ingest import IngestParams, run_ingest
-from inat_landscape.pipeline.sample import SAMPLE, StageError, run_sample
+from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS, StageError, run_sample
 from tests import fakes
 
 
@@ -42,3 +43,10 @@ def test_sample_needs_ingest_first(tmp_path):
 def test_sample_rejects_a_negative_n(workdir):
     with pytest.raises(StageError, match="n must be >= 0"):
         run_sample(workdir, -1)
+
+
+def test_sample_writes_the_ids_and_extensions_for_the_embed_workers(workdir):
+    table = run_sample(workdir, None)
+    ids = read_table(workdir / SAMPLE_IDS)
+    assert ids.column_names == ["photo_id", "extension"]
+    assert ids["photo_id"].to_pylist() == table["photo_id"].to_pylist()
