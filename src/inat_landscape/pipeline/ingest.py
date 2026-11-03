@@ -28,7 +28,7 @@ from inat_landscape.adapters.inat_dump import (
 )
 from inat_landscape.domain.licensing import attribution
 from inat_landscape.domain.sampling import sample_prefix
-from inat_landscape.domain.taxa import classify
+from inat_landscape.domain.taxa import TAXA_SCOPE, classify
 
 TAXA = "ingest/taxa.parquet"
 SELECTED = "ingest/selected.parquet"
@@ -49,6 +49,7 @@ class IngestParams:
     fraction: float
     res: int
     cap: int
+    taxa: str = TAXA_SCOPE  # the taxa scope (ADR 0004)
 
 
 def run_index(
@@ -98,7 +99,7 @@ def _covers(stored: dict | None, params: IngestParams) -> bool:
     wanted = asdict(params)
     return (
         stored is not None
-        and all(stored.get(k) == wanted[k] for k in ("source", "fraction", "res"))
+        and all(stored.get(k) == wanted[k] for k in ("source", "fraction", "res", "taxa"))
         and stored.get("cap", -1) >= params.cap
     )
 

@@ -37,6 +37,11 @@ def test_pull_with_empty_remote_is_an_error(tmp_path, hub):
 
 def test_state_files_cover_the_hand_off_points():
     assert set(STATE_FILES) == {
+        "ingest/taxa.parquet",
+        "ingest/taxa.json",
+        "ingest/index.json",
+        "ingest/selected.parquet",
+        "ingest/cell_counts.parquet",
         "ingest/manifest.json",
         "ingest/candidates.parquet",
         "sample.parquet",

@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 
+TAXA_SCOPE = "all"  # recorded with an index, so an index of another scope is not reused
 LIFE = 48460
 PLANTAE = 47126
 KINGDOMS = {

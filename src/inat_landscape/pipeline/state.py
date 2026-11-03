@@ -11,6 +11,11 @@ from inat_landscape.adapters.hub import Hub
 from inat_landscape.pipeline.errors import StageError
 
 STATE_FILES = (
+    "ingest/taxa.parquet",  # the index of the dump (two passes): a retry does not read it again
+    "ingest/taxa.json",
+    "ingest/index.json",
+    "ingest/selected.parquet",
+    "ingest/cell_counts.parquet",
     "ingest/manifest.json",
     "ingest/candidates.parquet",
     "sample.parquet",

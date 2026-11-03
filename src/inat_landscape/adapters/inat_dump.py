@@ -4,12 +4,16 @@ The dump is a gzipped tar with four tab-separated files. It is too large to stor
 this module reads it once as a stream and filters each file while it parses it.
 """
 
+import contextlib
+import http.client
+import io
 import tarfile
+import time
 import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, BinaryIO
+from typing import IO, Any, BinaryIO, cast
 
 import numpy as np
 import pyarrow as pa
@@ -97,10 +101,58 @@ class PhotoIndex:
 
 
 def open_source(source: str) -> BinaryIO:
-    """Open the dump from an https URL or a local path."""
+    """Open the dump from an https URL or a local path.
+
+    An https download resumes where it stopped (HTTP Range) when the connection breaks: the
+    37 GB stream takes about an hour, and a reset would lose the whole pass.
+    """
     if source.startswith("https://"):
-        return urllib.request.urlopen(source)  # noqa: S310 - scheme checked above
+        return cast(BinaryIO, io.BufferedReader(_ResumableHttp(source), 1 << 20))
     return Path(source).open("rb")
+
+
+_RETRY_WAIT = 5.0  # seconds between two tries
+_RETRIES = 20  # tries in a row with no byte read, before the error goes up
+
+
+class _ResumableHttp(io.RawIOBase):
+    """A read-only HTTP body that reopens at its position after a connection error."""
+
+    def __init__(self, url: str) -> None:
+        self.url, self.position, self.response = url, 0, None
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        for attempt in range(_RETRIES):
+            try:
+                if self.response is None:
+                    self.response = self._open()
+                n = self.response.readinto(buffer)
+            except (OSError, http.client.HTTPException):
+                self._drop(attempt)
+                continue
+            self.position += n
+            return n
+        raise ConnectionResetError(104, f"{self.url}: {_RETRIES} tries failed")
+
+    def _open(self) -> Any:
+        headers = {"Range": f"bytes={self.position}-"}
+        request = urllib.request.Request(self.url, headers=headers)  # noqa: S310 - https only
+        return urllib.request.urlopen(request, timeout=120)  # noqa: S310 - https only
+
+    def _drop(self, attempt: int) -> None:
+        if self.response is not None:
+            with contextlib.suppress(Exception):
+                self.response.close()
+        self.response = None
+        time.sleep(_RETRY_WAIT * min(attempt + 1, 6))
+
+    def close(self) -> None:
+        if self.response is not None:
+            self.response.close()
+        super().close()
 
 
 def read_dump(stream: BinaryIO, selection: Selection) -> DumpSlice:

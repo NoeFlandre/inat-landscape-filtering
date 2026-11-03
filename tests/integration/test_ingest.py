@@ -32,7 +32,7 @@ def _run(tmp_path, calls, params=PARAMS, **kw):
     return run_ingest(tmp_path, params, opener=_opener(calls), **kw)
 
 
-def test_candidates_keep_plants_and_unidentified_only(tmp_path):
+def test_candidates_carry_their_group(tmp_path):
     table = _run(tmp_path, [])
     assert table["photo_id"].to_pylist() == [101, 102, 103, 107]
     assert table["group"].to_pylist() == ["plantae", "plantae", "unidentified", "unidentified"]
@@ -126,3 +126,17 @@ def test_larger_cap_or_other_resolution_reads_the_dump_again(tmp_path):
         opener=_opener(calls),
     )
     assert len(calls) == 4  # taxa once, then one index pass each
+
+
+def test_an_index_of_another_taxa_scope_is_not_reused(tmp_path):
+    calls = []
+    _run(tmp_path, calls)
+    manifest = tmp_path / "ingest" / "index.json"
+    stored = json.loads(manifest.read_text())
+    assert stored["taxa"] == "all"
+    del stored["taxa"]  # an index of the plants-only scope had no taxa key
+    manifest.write_text(json.dumps(stored))
+    (tmp_path / "ingest" / "manifest.json").unlink()
+    before = len(calls)
+    _run(tmp_path, calls)
+    assert len(calls) > before + 1  # the index pass runs again, then the details pass

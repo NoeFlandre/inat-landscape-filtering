@@ -37,9 +37,11 @@ if [ "$CAP" = sample ]; then
     run state pull --only ingest/manifest.json,ingest/candidates.parquet,failures.parquet
 else
     # Keep only the failure file of the earlier runs: old candidates can have another scope.
-    uv run --no-sync inat-landscape --workdir "$BASE/old" state pull --only failures.parquet
-    cp "$BASE/old/failures.parquet" "$WORK/" 2>/dev/null || true
+    # The failure file and the dump index of an earlier try, if any (the index records its
+    # parameters and its taxa scope, so a stale index is not used).
+    run state pull --only failures.parquet,ingest/taxa.parquet,ingest/taxa.json,ingest/index.json,ingest/selected.parquet,ingest/cell_counts.parquet || true
     run measure --cap "$CAP" --caps "10,50,100,300,1000"
+    run state push  # the index (about 700 MB): a retry starts at the details pass
     run ingest --cap "$CAP"
 fi
 run sample

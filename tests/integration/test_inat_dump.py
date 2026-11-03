@@ -76,8 +76,47 @@ def test_open_source_reads_local_path(tmp_path):
         assert read_dump(stream, ALL).photos.num_rows == 4
 
 
-def test_open_source_uses_urlopen_for_https(monkeypatch):
-    seen = []
-    monkeypatch.setattr("urllib.request.urlopen", lambda url: seen.append(url) or io.BytesIO())
-    open_source("https://example.org/dump.tar.gz")
-    assert seen == ["https://example.org/dump.tar.gz"]
+class _Flaky:
+    """urlopen stand-in: each response breaks after `cut` bytes, until the last part."""
+
+    def __init__(self, data: bytes, cut: int) -> None:
+        self.data, self.cut, self.ranges = data, cut, []
+
+    def __call__(self, request, timeout=None):
+        start = int((request.get_header("Range") or "bytes=0-")[6:-1])
+        self.ranges.append(start)
+        part = self.data[start : start + self.cut]
+        broken = start + self.cut < len(self.data)
+        return _Response(part, broken)
+
+
+class _Response(io.BytesIO):
+    def __init__(self, data: bytes, broken: bool) -> None:
+        super().__init__(data)
+        self.broken = broken
+
+    def readinto(self, buffer):
+        n = super().readinto(buffer)
+        if n == 0 and self.broken:
+            raise ConnectionResetError(104, "Connection reset by peer")
+        return n
+
+
+def test_open_source_resumes_an_https_download_after_a_reset(monkeypatch):
+    data = fakes.make_dump()
+    flaky = _Flaky(data, cut=97)
+    monkeypatch.setattr("urllib.request.urlopen", flaky)
+    monkeypatch.setattr("inat_landscape.adapters.inat_dump._RETRY_WAIT", 0.0)
+    with open_source("https://example.org/dump.tar.gz") as stream:
+        assert read_dump(stream, ALL).photos.num_rows == 4
+    assert flaky.ranges[:3] == [0, 97, 194]
+
+
+def test_open_source_gives_up_after_many_resets_without_progress(monkeypatch):
+    def broken(request, timeout=None):
+        raise ConnectionResetError(104, "Connection reset by peer")
+
+    monkeypatch.setattr("urllib.request.urlopen", broken)
+    monkeypatch.setattr("inat_landscape.adapters.inat_dump._RETRY_WAIT", 0.0)
+    with pytest.raises(ConnectionResetError), open_source("https://example.org/d") as stream:
+        stream.read(10)
