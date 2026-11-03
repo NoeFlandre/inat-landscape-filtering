@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Grid'5000 OAR batch job, on one CPU node: score the embeddings and publish the dataset.
+#
+#   oarsub -l "host=1,walltime=1:00:00" "$HOME/inat-landscape-filtering/scripts/g5k/publish.oar refresh"
+#   oarsub -l "host=1,walltime=1:00:00" "$HOME/inat-landscape-filtering/scripts/g5k/publish.oar final"
+#
+# refresh: during the embedding run, publish the metadata, figures and card (no images) every
+#          20 minutes, until the walltime is nearly over.
+# final:   publish once with the 500 px images (uploaded in parts of 2,000, ADR 0010).
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
+MODE="${1:?usage: publish.oar refresh|final}"
+BASE="/tmp/inat-$USER-publish"
+# A copy on the node /tmp: a `git pull` on the NFS /home does not stop the job.
+if [ "$0" != "$BASE/publish.oar" ]; then
+    mkdir -p "$BASE" && cp "$0" "$BASE/publish.oar"
+    exec bash "$BASE/publish.oar" "$@"
+fi
+WORK="$BASE/work"
+export UV_CACHE_DIR="$BASE/uv-cache" UV_PYTHON_INSTALL_DIR="$BASE/python" UV_LINK_MODE=copy
+export UV_PROJECT_ENVIRONMENT="$BASE/venv" HF_HOME="$BASE/hf" HF_HUB_DISABLE_PROGRESS_BARS=1
+HF_TOKEN="$(cat "$HOME/.hf_token")"
+export HF_TOKEN
+export PATH="$BASE/bin:$HOME/.local/bin:$PATH"
+mkdir -p "$WORK"
+
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/0.11.32/install.sh \
+    | env UV_INSTALL_DIR="$BASE/bin" UV_NO_MODIFY_PATH=1 sh
+cd "$REPO_DIR"
+uv sync --locked -q
+run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
+
+run state pull
+publish() {  # $1: --images or --no-images
+    run score | grep -E "^n=" || true
+    run publish --score score_contrast --thresholds 0.04,0.06,0.08 --cap-per-cell 10 "$1"
+}
+if [ "$MODE" = final ]; then
+    publish --images
+    exit 0
+fi
+end=$(($(date +%s) + 45 * 60))
+while [ "$(date +%s)" -lt "$end" ]; do
+    publish --no-images
+    sleep 1200
+done
