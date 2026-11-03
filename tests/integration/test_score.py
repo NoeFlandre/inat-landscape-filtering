@@ -29,7 +29,7 @@ def embedded(tmp_path, server, monkeypatch):
 def test_scores_only_embedded_photos_in_sample_order(embedded):
     workdir, hub = embedded
     table = run_score(workdir, FakeEncoder(), hub)
-    assert table["photo_id"].to_pylist() == [101, 102, 107]
+    assert table["photo_id"].to_pylist() == [101, 107, 102]  # uniform order
     assert (workdir / SCORED).exists()
 
 

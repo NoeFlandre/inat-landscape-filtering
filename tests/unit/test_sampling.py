@@ -2,17 +2,18 @@
 
 import random
 import uuid
+from collections import Counter
 
+import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from inat_landscape.domain.sampling import (
-    Candidate,
     for_worker,
     in_sample,
     sample_prefix,
-    select,
+    uniform_order,
     uuid_key,
 )
 
@@ -55,41 +56,67 @@ def test_kept_share_matches_fraction():
     assert 0.22 < share < 0.28
 
 
-candidates = st.lists(
-    st.builds(
-        Candidate,
-        observation_uuid=uuids,
-        position=st.integers(0, 5),
-        photo_id=st.integers(1, 10**9),
-    ),
-    unique_by=lambda c: c.photo_id,
+photos = st.lists(
+    st.tuples(st.integers(0, 2**64 - 1), st.integers(0, 3), st.integers(0, 4)),  # key, pos, cell
     max_size=40,
 )
 
 
-@given(candidates, st.integers(0, 50), st.integers(0, 50))
-def test_select_grows_as_superset(cands, a, b):
-    small, large = sorted((a, b))
-    assert set(select(cands, small)) <= set(select(cands, large))
+def _order(rows):
+    keys = np.array([r[0] for r in rows], dtype=np.uint64)
+    positions = np.array([r[1] for r in rows], dtype=np.int64)
+    ids = np.arange(len(rows), dtype=np.int64)
+    cells = np.array([r[2] for r in rows], dtype=np.int64)
+    return uniform_order(keys, positions, ids, cells)
 
 
-@given(candidates, st.integers(0, 50))
-def test_select_is_order_independent_and_sized(cands, n):
-    chosen = select(cands, n)
-    assert chosen == select(list(reversed(cands)), n)
-    assert len(chosen) == min(n, len(cands))
+@given(photos, st.integers(0, 50))
+def test_any_prefix_of_the_order_is_uniform_over_the_cells(rows, n):
+    ids, ranks = _order(rows)
+    first = Counter(rows[i][2] for i in ids[:n].tolist())
+    left = Counter(rows[i][2] for i in ids[n:].tolist())
+    # A cell with photos left has no fewer photos in the prefix than the cap reached so far.
+    assert all(first[c] >= max(first.values(), default=0) - 1 for c in left)
+    assert sorted(ids.tolist()) == list(range(len(rows)))
+    assert ranks.tolist() == sorted(ranks.tolist())
 
 
-def test_select_orders_by_observation_then_position_then_photo():
-    a = Candidate("00000000-0000-4000-8000-000000000000", 1, 9)
-    b = Candidate("00000000-0000-4000-8000-000000000000", 0, 10)
-    c = Candidate("10000000-0000-4000-8000-000000000000", 0, 1)
-    assert select([c, a, b], 3) == [10, 9, 1]
+@given(photos)
+def test_the_rank_is_the_place_of_a_photo_in_the_sample_order_of_its_cell(rows):
+    ids, ranks = _order(rows)
+    sample = sorted(range(len(rows)), key=lambda i: (rows[i][0], rows[i][1], i))
+    seen: Counter = Counter()
+    expected = {}
+    for i in sample:
+        expected[i] = seen[rows[i][2]]
+        seen[rows[i][2]] += 1
+    assert dict(zip(ids.tolist(), ranks.tolist(), strict=True)) == expected
 
 
-def test_select_rejects_negative_n():
-    with pytest.raises(ValueError, match="n must be >= 0"):
-        select([], -1)
+def test_order_is_rank_then_observation_then_position_then_photo():
+    keys = np.array([5, 5, 9, 1], dtype=np.uint64)
+    positions = np.array([1, 0, 0, 0], dtype=np.int64)
+    ids = np.array([10, 11, 12, 13], dtype=np.int64)
+    cells = np.array([7, 7, 7, 8], dtype=np.int64)
+    ordered, ranks = uniform_order(keys, positions, ids, cells)
+    assert ordered.tolist() == [13, 11, 10, 12]
+    assert ranks.tolist() == [0, 0, 1, 2]
+    assert ranks.dtype == np.int64
+
+
+def test_order_does_not_depend_on_the_input_order():
+    keys = np.array([3, 1, 2], dtype=np.uint64)
+    cells = np.array([0, 0, 1], dtype=np.int64)
+    zero = np.zeros(3, dtype=np.int64)
+    ids = np.array([1, 2, 3], dtype=np.int64)
+    back = uniform_order(keys[::-1], zero, ids[::-1], cells[::-1])[0].tolist()
+    assert uniform_order(keys, zero, ids, cells)[0].tolist() == back
+
+
+def test_empty_order():
+    empty = np.array([], dtype=np.int64)
+    ids, ranks = uniform_order(empty.astype(np.uint64), empty, empty, empty)
+    assert (ids.tolist(), ranks.tolist()) == ([], [])
 
 
 def test_uuid_key_is_the_first_16_hex_digits():

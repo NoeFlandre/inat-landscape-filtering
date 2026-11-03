@@ -4,20 +4,12 @@ An observation is in the sample when the first 8 hex digits of its UUID are belo
 prefix derived from the sample fraction. A larger fraction always keeps a superset.
 """
 
-from dataclasses import dataclass
+import numpy as np
+from numpy.typing import NDArray
 
 _KEY_DIGITS = 8
 _KEY_SPACE = 16**_KEY_DIGITS
 _KEEP_ALL = "g"  # sorts after every lowercase hex digit string
-
-
-@dataclass(frozen=True, slots=True)
-class Candidate:
-    """One photo that can enter the sample."""
-
-    observation_uuid: str
-    position: int
-    photo_id: int
 
 
 def sample_prefix(fraction: float) -> str:
@@ -38,19 +30,36 @@ def uuid_key(observation_uuid: str) -> int:
     return int(observation_uuid.replace("-", "")[:16], 16)
 
 
-def select(candidates: list[Candidate], n: int) -> list[int]:
-    """Return the photo ids of the first `n` candidates in sample order.
+def uniform_order(
+    keys: NDArray[np.uint64],
+    positions: NDArray[np.int64],
+    photo_ids: NDArray[np.int64],
+    cells: NDArray[np.int64],
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Return the photo ids in uniform order, and the rank of each photo in its cell.
 
-    The order is (observation key, photo position, photo id). Because UUID v4 values are
-    random, the first `n` photos are a random sample, and a larger `n` gives a superset.
+    The sample order is (observation key, photo position, photo id). Because UUID v4 values
+    are random, it is a random order. The rank of a photo is its place in the sample order of
+    its H3 cell. The uniform order is (rank, sample order): first one photo of each cell, then
+    a second one, and so on. Thus the first n photos have the same count in each cell (one
+    more in some cells), as far as the cells have photos. A larger n gives a superset.
     """
-    if n < 0:
-        raise ValueError(f"n must be >= 0, got {n}")
-    return [c.photo_id for c in sorted(candidates, key=_order)[:n]]
+    order = np.lexsort((photo_ids, positions, keys))
+    ranks = np.empty_like(order)
+    ranks[order] = _ranks_in_groups(cells[order])
+    uniform = np.lexsort((np.argsort(order), ranks))
+    return photo_ids[uniform], ranks[uniform]
 
 
-def _order(c: Candidate) -> tuple[int, int, int]:
-    return (uuid_key(c.observation_uuid), c.position, c.photo_id)
+def _ranks_in_groups(groups: NDArray[np.int64]) -> NDArray[np.int64]:
+    """Return the place of each item among the earlier items of its group."""
+    by_group = np.lexsort((np.arange(len(groups)), groups))  # stable: earlier items first
+    sorted_groups = groups[by_group]
+    starts = np.flatnonzero(np.r_[True, sorted_groups[1:] != sorted_groups[:-1]])
+    sizes = np.diff(np.r_[starts, len(groups)])
+    ranks = np.empty_like(by_group)
+    ranks[by_group] = np.arange(len(groups)) - np.repeat(starts, sizes)
+    return ranks
 
 
 def for_worker(photo_id: int, worker: int, workers: int) -> bool:

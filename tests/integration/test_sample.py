@@ -16,10 +16,13 @@ def workdir(tmp_path):
     return tmp_path
 
 
-def test_sample_takes_first_n_in_order(workdir):
+def test_sample_takes_first_n_in_uniform_order(workdir):
+    # 101 and 102 share a cell: 102 comes after the first photo of every other cell.
     table = run_sample(workdir, 3)
-    assert table["photo_id"].to_pylist() == [101, 102, 103]
+    assert table["photo_id"].to_pylist() == [101, 103, 107]
     assert table["sample_rank"].to_pylist() == [0, 1, 2]
+    assert table["cell_rank"].to_pylist() == [0, 0, 0]
+    assert run_sample(workdir, None)["cell_rank"].to_pylist() == [0, 0, 0, 1]
     assert (workdir / SAMPLE).exists()
 
 
@@ -34,3 +37,8 @@ def test_sample_larger_than_candidates_keeps_all(workdir):
 def test_sample_needs_ingest_first(tmp_path):
     with pytest.raises(StageError, match="ingest"):
         run_sample(tmp_path, 3)
+
+
+def test_sample_rejects_a_negative_n(workdir):
+    with pytest.raises(StageError, match="n must be >= 0"):
+        run_sample(workdir, -1)

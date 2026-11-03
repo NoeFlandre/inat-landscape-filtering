@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Grid'5000 OAR batch job, on one CPU node with much memory (for example dahu in Grenoble):
+# read the metadata dump, keep the capped candidates, write the sample in uniform order
+# (ADR 0011), and put the state on the private hub repository.
+#
+#   oarsub -q default -l "host=1,walltime=1:00:00" -p "gpu_count=0 AND cluster='dahu'" \
+#       "$HOME/inat-landscape-filtering/scripts/g5k/ingest.oar 1000"
+#
+# The dump passes take more than 1 hour: extend the job by 1 hour in its last 10 minutes
+# (`oarwalltime JOB_ID +1:00`), as the usage policy permits.
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$HOME/inat-landscape-filtering}"
+CAP="${1:?usage: ingest.oar CAP}"
+BASE="/tmp/inat-$USER-ingest"
+# A copy on the node /tmp: a `git pull` on the NFS /home does not stop the job.
+if [ "$0" != "$BASE/ingest.oar" ]; then
+    mkdir -p "$BASE" && cp "$0" "$BASE/ingest.oar"
+    exec bash "$BASE/ingest.oar" "$@"
+fi
+WORK="$BASE/work"
+export UV_CACHE_DIR="$BASE/uv-cache" UV_PYTHON_INSTALL_DIR="$BASE/python" UV_LINK_MODE=copy
+export UV_PROJECT_ENVIRONMENT="$BASE/venv" HF_HOME="$BASE/hf" HF_HUB_DISABLE_PROGRESS_BARS=1
+HF_TOKEN="$(cat "$HOME/.hf_token")"
+export HF_TOKEN
+export PATH="$BASE/bin:$HOME/.local/bin:$PATH"
+mkdir -p "$WORK"
+
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/0.11.32/install.sh \
+    | env UV_INSTALL_DIR="$BASE/bin" UV_NO_MODIFY_PATH=1 sh
+cd "$REPO_DIR"
+uv sync --locked -q
+run() { uv run --no-sync inat-landscape --workdir "$WORK" "$@"; }
+
+# Keep only the failure file of the earlier runs: the old candidates have another taxa scope.
+uv run --no-sync inat-landscape --workdir "$BASE/old" state pull
+cp "$BASE/old/failures.parquet" "$WORK/" 2>/dev/null || true
+run measure --cap "$CAP" --caps "10,50,100,300,1000"
+run ingest --cap "$CAP"
+run sample
+run status
+run state push

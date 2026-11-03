@@ -14,6 +14,7 @@ KINGDOMS = {
     151817: "archaea",
     131236: "viruses",
 }
+_NAMES = {str(i): name for i, name in KINGDOMS.items()}  # ancestry ids are text
 
 
 class Group(StrEnum):
@@ -40,6 +41,6 @@ def classify(taxon_id: int | None, ancestry: str | None) -> Group:
         return Group.UNIDENTIFIED
     # Any default that is not a taxon id is equivalent, so the line is not mutated.
     ancestors = (ancestry or "").split("/")  # pragma: no mutate
-    lineage = {str(taxon_id), *ancestors}
-    kingdom = next((name for i, name in KINGDOMS.items() if str(i) in lineage), "other")
-    return Group(kingdom)
+    # The ancestry goes from the root down: the first kingdom on the way is the kingdom.
+    lineage = [*ancestors, str(taxon_id)]
+    return Group(next((_NAMES[t] for t in lineage if t in _NAMES), "other"))

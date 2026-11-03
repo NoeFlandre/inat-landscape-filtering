@@ -65,6 +65,12 @@ def test_every_observation_has_a_group(taxon_id, ancestry):
 
 
 @given(st.integers(1, 10**6), ancestries)
-def test_plantae_iff_47126_is_an_ancestor_or_self(taxon_id, ancestry):
-    expected = taxon_id == PLANTAE or str(PLANTAE) in ancestry.split("/")
-    assert (classify(taxon_id, ancestry) is Group.PLANTAE) == (expected and taxon_id != LIFE)
+def test_the_group_is_the_first_kingdom_from_the_root(taxon_id, ancestry):
+    lineage = [int(t) for t in ancestry.split("/")] + [taxon_id]
+    first = next((KINGDOMS[t] for t in lineage if t in KINGDOMS), "other")
+    expected = Group.UNIDENTIFIED if taxon_id == LIFE else Group(first)
+    assert classify(taxon_id, ancestry) is expected
+
+
+def test_a_kingdom_above_another_id_wins():
+    assert classify(PLANTAE, "48460/1") is Group.ANIMALIA

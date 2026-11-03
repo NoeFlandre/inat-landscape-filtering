@@ -115,7 +115,8 @@ Score quantiles, over all 10 photos:
 | `score_closeup` | float | Score of the close-up prompts |
 | `score_contrast` | float | Landscape minus specimen prompts: cosine in [-1, 1] |
 | `h3_cell` | int | [H3](https://h3geo.org) cell of the location |
-| `sample_rank` | int | Position of the photo in the sample order |
+| `sample_rank` | int | Position of the photo in the uniform sample order |
+| `cell_rank` | int | Place of the photo in the sample order of its H3 cell |
 | `image` | image | The 500 px photo (threshold configs only) |
 
 The `embeddings` config has one row per photo: `photo_id` and `embedding` (list of 768 float16). Join it to the other configs on `photo_id`.

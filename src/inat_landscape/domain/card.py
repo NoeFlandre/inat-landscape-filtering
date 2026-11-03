@@ -103,7 +103,8 @@ def fields(n_prompts: int) -> tuple[Field, ...]:
         Field(("score_closeup",), "float", "Score of the close-up prompts"),
         Field(("score_contrast",), "float", "Landscape minus specimen prompts: cosine in [-1, 1]"),
         Field(("h3_cell",), "int", "[H3](https://h3geo.org) cell of the location"),
-        Field(("sample_rank",), "int", "Position of the photo in the sample order"),
+        Field(("sample_rank",), "int", "Position of the photo in the uniform sample order"),
+        Field(("cell_rank",), "int", "Place of the photo in the sample order of its H3 cell"),
         Field(("image",), "image", "The 500 px photo (threshold configs only)"),
     )
 
