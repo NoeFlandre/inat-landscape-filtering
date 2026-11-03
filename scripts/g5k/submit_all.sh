@@ -60,7 +60,7 @@ while read -r site options; do
     [ ${#pending[@]} -gt 0 ] || break
     slot="${pending[0]}/$count"
     command="cd inat-landscape-filtering && ./scripts/g5k/submit.sh $slot $options"
-    out="$(ssh -n "$site" "$command" 2>&1 | tail -1)"
+    out="$(ssh -n "$site" "$command" 2>&1 | tail -1)" || true  # a refused GPU is not fatal
     echo "$site $slot: $out"
     if grep -q OAR_JOB_ID= <<< "$out"; then pending=("${pending[@]:1}"); fi
 done < "$tmp/seats.txt"
