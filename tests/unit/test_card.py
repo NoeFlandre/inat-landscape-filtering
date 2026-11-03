@@ -148,3 +148,10 @@ def test_card_says_when_images_come_later():
     assert "The 500 px images are added at the end of the run." not in render_card(_info())
     card = render_card(replace(_info(), with_images=False))
     assert "embedding.**\n\nThe 500 px images are added at the end of the run.\n\n" in card
+
+
+def test_card_acknowledges_grid5000():
+    card = render_card(_info())
+    section = card.split("## Acknowledgements\n", 1)[1]
+    assert "Grid'5000 testbed" in section
+    assert "https://www.grid5000.fr" in section

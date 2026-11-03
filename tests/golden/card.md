@@ -168,3 +168,7 @@ Each photo keeps its own licence, in `license`, and the attribution it requires,
 * `CC-BY-NC`: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), no commercial use. Remove these rows with a filter on `license` for commercial use.
 
 Metadata: iNaturalist Open Data. Scores and embeddings: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). To have a photo removed, open a discussion on this repository.
+
+## Acknowledgements
+
+The embeddings were computed on the Grid'5000 testbed, supported by a scientific interest group hosted by Inria and including CNRS, RENATER and several Universities as well as other organizations (see https://www.grid5000.fr).

@@ -148,6 +148,7 @@ def render_card(info: CardInfo) -> str:
             _scores(info),
             _method(info),
             _license(),
+            _acknowledgements(),
         ]
     )
 
@@ -410,4 +411,13 @@ commercial use. Remove these rows with a filter on `license` for commercial use.
 Metadata: iNaturalist Open Data. Scores and embeddings: [CC BY 4.0]\
 (https://creativecommons.org/licenses/by/4.0/). To have a photo removed, open a discussion \
 on this repository.
+"""
+
+
+def _acknowledgements() -> str:
+    return """## Acknowledgements
+
+The embeddings were computed on the Grid'5000 testbed, supported by a scientific interest \
+group hosted by Inria and including CNRS, RENATER and several Universities as well as other \
+organizations (see https://www.grid5000.fr).
 """
