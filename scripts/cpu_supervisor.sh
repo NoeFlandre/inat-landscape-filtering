@@ -6,7 +6,9 @@
 # with at least 4.5 GB RAM and 3 GB disk free. The HF token is read from ~/.hf_token.
 # Usage: nohup scripts/cpu_supervisor.sh >> work/full/supervisor.log 2>&1 &
 cd "$(dirname "$0")/.."
-export HF_TOKEN="${HF_TOKEN:-$(cat "$HOME/.hf_token")}"
+# The token file wins over the environment: a shell can carry an old, invalid HF_TOKEN.
+if [ -f "$HOME/.hf_token" ]; then HF_TOKEN=$(cat "$HOME/.hf_token"); fi
+export HF_TOKEN
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 W=work/full; N=4
 declare -A seen
