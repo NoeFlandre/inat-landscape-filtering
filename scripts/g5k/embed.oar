@@ -24,6 +24,8 @@ KEEP="$HOME/.inat-landscape/$SLOT"
 # the caches and the work directory. Each slot has its own folder, as jobs can share a node.
 WORK="$BASE/work"
 FAILS="failures-$SLOT.parquet"
+# One worker (0/1, the retry pass) uses the shared failure file of the state.
+[ "${WORKER#*/}" = 1 ] && FAILS="failures.parquet"
 export UV_CACHE_DIR="$BASE/uv-cache" UV_PYTHON_INSTALL_DIR="$BASE/python" UV_LINK_MODE=copy
 export UV_PROJECT_ENVIRONMENT="$BASE/venv" HF_HOME="$BASE/hf" HF_HUB_DISABLE_PROGRESS_BARS=1
 # The token file is made once on each site (mode 600). It is never in the repository.
@@ -64,3 +66,5 @@ next=(oarsub -a "$OAR_JOB_ID" -n "inat-embed-$SLOT" "${options[@]}" -l "gpu=1,wa
 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "frontend.$(hostname -d)" "${next[*]@Q}" \
     || echo "could not queue the next job: run scripts/g5k/submit.sh $WORKER again" >&2
 run embed --worker "$WORKER" --chunk 50000 --batch-size 256 --concurrency 64 --download-batch 2048
+# The retry pass puts the new failure file in the state, for `score`, `publish` and `--plan`.
+if [ "${WORKER#*/}" = 1 ]; then run state push; fi
