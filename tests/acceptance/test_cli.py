@@ -59,6 +59,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
         == 0
     )
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
+    assert _run(deps, tmp_path, "embed", "--snapshot") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--max-photos", "1000") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
@@ -71,6 +72,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "cells=3 photos=4 max_per_cell=2" in out
     assert "worklist=4" in out
+    assert "snapshot=" in out
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out

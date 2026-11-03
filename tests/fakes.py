@@ -97,6 +97,7 @@ class FakeHub:
         return dest
 
     def read_ids(self, path: str) -> list[int]:
+        self.id_reads = getattr(self, "id_reads", 0) + 1
         return pq.read_table(self.remote / path, columns=["photo_id"])["photo_id"].to_pylist()
 
     def upload_file(self, local: Path, path: str, message: str) -> None:

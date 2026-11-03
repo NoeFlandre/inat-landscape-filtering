@@ -8,6 +8,7 @@ with its own. The other slots of its count cannot overlap, so their shards are n
 """
 
 import hashlib
+import json
 import re
 import shutil
 from collections.abc import Iterator, Sequence
@@ -19,7 +20,9 @@ import pyarrow.parquet as pq
 
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
-from inat_landscape.domain.sampling import Slots
+from inat_landscape.domain.sampling import Slots, in_slots
+
+_INDEX = "index"  # the done-ids snapshot; not a shard (the embeddings config reads *.parquet)
 
 
 class EmbeddingStore:
@@ -45,16 +48,56 @@ class EmbeddingStore:
         return len(missing)
 
     def _remote_shards(self) -> list[str]:
-        return [p for p in self.hub.list_files(self.remote_dir + "/") if p.endswith(".parquet")]
+        files = self.hub.list_files(self.remote_dir + "/")
+        return [p for p in files if p.endswith(".parquet") and f"/{_INDEX}/" not in p]
 
     def remote_ids(self) -> set[int]:
-        """Return the ids of the remote shards of this tag and of the untagged shards.
+        """Return the ids of the remote photos that can belong to this tag.
 
-        Only the `photo_id` column is read: no shard is stored.
+        The done-ids snapshot gives the ids of the shards it covers in one file; the other
+        shards that can overlap this tag are read (`photo_id` column only). No shard is stored.
         """
-        return {
-            i for path in self._remote_shards() if self._mine(path) for i in self.hub.read_ids(path)
-        }
+        ids, covered = self._snapshot()
+        own = _tag_slots(self.tag)
+        if own is not None:
+            ids = ids[in_slots(ids, own)]
+        done = set(ids.tolist())
+        for path in self._remote_shards():
+            if path not in covered and self._mine(path):
+                done.update(self.hub.read_ids(path))
+        return done
+
+    def snapshot(self) -> int:
+        """Write and upload the done-ids snapshot of all the remote shards. Return its size.
+
+        The shards that the old snapshot covers are not read again.
+        """
+        ids, covered = self._snapshot()
+        shards = self._remote_shards()
+        new = [np.asarray(self.hub.read_ids(p), np.int64) for p in shards if p not in covered]
+        every = np.unique(np.concatenate([ids, *new]))
+        table = pa.table({"photo_id": every}).replace_schema_metadata(
+            {b"shards": json.dumps(sorted(set(shards) | covered)).encode()}
+        )
+        local = self.root / ".snapshot" / "done-ids.parquet"
+        write_table(table, local)
+        self.hub.upload_file(local, self._snapshot_path, f"Snapshot of {len(every)} done ids")
+        shutil.rmtree(local.parent)
+        return len(every)
+
+    @property
+    def _snapshot_path(self) -> str:
+        return f"{self.remote_dir}/{_INDEX}/done-ids.parquet"
+
+    def _snapshot(self) -> tuple[np.ndarray, set[str]]:
+        """Return the ids and the covered shards of the remote snapshot (none if absent)."""
+        if self._snapshot_path not in self.hub.list_files(f"{self.remote_dir}/{_INDEX}/"):
+            return np.zeros(0, np.int64), set()
+        staging = self.root / ".snapshot"
+        table = pq.read_table(self.hub.download(self._snapshot_path, staging))
+        shutil.rmtree(staging)
+        covered = set(json.loads((table.schema.metadata or {}).get(b"shards", b"[]")))
+        return table["photo_id"].to_numpy(), covered
 
     def _mine(self, path: str) -> bool:
         """Tell if a shard can hold photos of this tag: untagged, or a slot range (or another

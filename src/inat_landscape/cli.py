@@ -23,7 +23,7 @@ from inat_landscape.domain.sampling import Slots
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
-from inat_landscape.pipeline.embed import EmbedOptions, plan_embed, run_embed
+from inat_landscape.pipeline.embed import EmbedOptions, open_store, plan_embed, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.ports import Encoder
@@ -235,6 +235,11 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         "--plan", action="store_true", help="only print the photos left for this worker (todo=N)"
     )
     p.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="only write the done-ids snapshot of the hub shards (the jobs read it at start)",
+    )
+    p.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -317,9 +322,12 @@ def _sample(args: argparse.Namespace, _deps: Deps) -> None:
 
 
 def _embed(args: argparse.Namespace, deps: Deps) -> None:
-    if args.plan:
+    if args.plan or args.snapshot:
         hub = deps.hub(args.repo_id, args.offline)
-        print(f"todo={plan_embed(args.workdir, args.model, hub, worker=args.worker)}")
+        if args.snapshot:
+            print(f"snapshot={open_store(args.workdir, args.model, hub).snapshot()}")
+        else:
+            print(f"todo={plan_embed(args.workdir, args.model, hub, worker=args.worker)}")
         return
     _run_embed(args, deps)
 

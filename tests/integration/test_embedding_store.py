@@ -104,3 +104,30 @@ def test_a_slot_range_reads_the_shards_of_the_ranges_it_overlaps(tmp_path, hub):
     EmbeddingStore(tmp_path / "b", DIR, hub, tag="w2-4of9").add([2], np.ones((1, 2)))
     EmbeddingStore(tmp_path / "c", DIR, hub, tag="w3of9").add([3], np.ones((1, 2)))
     assert EmbeddingStore(tmp_path / "d", DIR, hub, tag="w1-3of9").remote_ids() == {1, 2}
+
+
+def test_a_snapshot_of_the_done_ids_replaces_the_reads_of_the_shards_it_covers(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub).add([1, 2], np.ones((2, 2)))
+    EmbeddingStore(tmp_path / "b", DIR, hub, tag="w0of2").add([4], np.ones((1, 2)))
+    assert EmbeddingStore(tmp_path / "s", DIR, hub).snapshot() == 3
+    EmbeddingStore(tmp_path / "c", DIR, hub, tag="w1of2").add([5], np.ones((1, 2)))
+    hub.id_reads = 0
+    fresh = EmbeddingStore(tmp_path / "d", DIR, hub, tag="w1of2")
+    assert fresh.remote_ids() == {1, 5}  # the photos of slot 1 of 2 (odd ids)
+    assert hub.id_reads == 1  # only the shard made after the snapshot
+
+
+def test_the_snapshot_is_not_an_embedding_shard(tmp_path, hub):
+    store = EmbeddingStore(tmp_path / "a", DIR, hub)
+    store.add([1], np.ones((1, 2)))
+    store.snapshot()
+    assert [ids for ids, _ in EmbeddingStore(tmp_path / "b", DIR, hub).stream()] == [[1]]
+
+
+def test_a_second_snapshot_reads_only_the_new_shards(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub).add([1], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "s", DIR, hub).snapshot()
+    EmbeddingStore(tmp_path / "b", DIR, hub).add([2], np.ones((1, 2)))
+    hub.id_reads = 0
+    assert EmbeddingStore(tmp_path / "t", DIR, hub).snapshot() == 2
+    assert hub.id_reads == 1
