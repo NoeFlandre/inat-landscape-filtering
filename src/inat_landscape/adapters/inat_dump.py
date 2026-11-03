@@ -246,7 +246,8 @@ def uuid_keys(uuids: pa.Array | pa.ChunkedArray) -> NDArray[np.uint64]:
     digits = pc.utf8_slice_codeunits(pc.replace_substring(uuids, "-", ""), 0, 16)
     if isinstance(digits, pa.ChunkedArray):
         digits = digits.combine_chunks()
-    offsets = np.frombuffer(digits.buffers()[1], dtype=np.int32)[digits.offset :]
+    width = np.int64 if pa.types.is_large_string(digits.type) else np.int32  # offset size
+    offsets = np.frombuffer(digits.buffers()[1], dtype=width)[digits.offset :]
     raw = np.frombuffer(digits.buffers()[2], dtype=np.uint8)[offsets[0] : offsets[len(digits)]]
     nibbles = _HEX[raw.reshape(-1, 16)]
     return np.bitwise_or.reduce(nibbles << _SHIFTS, axis=1).astype(np.uint64)

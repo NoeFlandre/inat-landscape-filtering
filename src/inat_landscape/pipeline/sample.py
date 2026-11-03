@@ -15,6 +15,8 @@ from inat_landscape.pipeline.ingest import CANDIDATES, IngestParams, Opener, run
 SAMPLE = "sample.parquet"
 SAMPLE_IDS = "sample-ids.parquet"  # photo_id and extension only: all that the embed jobs read
 
+_IDS_SCHEMA = pa.schema([("photo_id", pa.int64()), ("extension", pa.string())])
+
 __all__ = ["SAMPLE", "SAMPLE_IDS", "StageError", "run_sample"]
 
 
@@ -40,7 +42,7 @@ def run_sample(workdir: Path, n: int | None) -> pa.Table:
     sample = sample.append_column("cell_rank", pa.array(ranks[where]))
     sample = sample.sort_by("sample_rank")
     write_table(sample, workdir / SAMPLE)
-    write_table(sample.select(["photo_id", "extension"]), workdir / SAMPLE_IDS)
+    write_table(_ids(sample), workdir / SAMPLE_IDS)
     return sample
 
 
@@ -68,6 +70,11 @@ def run_worklist(workdir: Path, params: IngestParams, *, opener: Opener = open_s
     )
     order = pa.table({"photo_id": ids, "_place": np.arange(len(ids))})
     table = selected.select(["photo_id", "extension"]).join(order, "photo_id")
-    table = table.sort_by("_place").drop_columns(["_place"])
+    table = _ids(table.sort_by("_place"))
     write_table(table, workdir / SAMPLE_IDS)
     return table
+
+
+def _ids(table: pa.Table) -> pa.Table:
+    """Return the photo ids and extensions (short texts: a 32-bit string column holds them)."""
+    return table.select(["photo_id", "extension"]).cast(_IDS_SCHEMA)

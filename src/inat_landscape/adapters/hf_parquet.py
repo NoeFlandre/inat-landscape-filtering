@@ -9,6 +9,7 @@ _DTYPES = {
     pa.int64(): "int64",
     pa.float64(): "float64",
     pa.string(): "string",
+    pa.large_string(): "large_string",
     pa.bool_(): "bool",
 }
 

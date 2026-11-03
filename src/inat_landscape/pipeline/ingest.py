@@ -134,7 +134,16 @@ def build_candidates(dump: DumpSlice, selected: pa.Table) -> pa.Table:
         table.schema.get_field_index("license"), "license", pc.utf8_upper(table["license"])
     )
     table = table.append_column("attribution", attributions(table))
-    return table.sort_by([("photo_id", "ascending")])
+    return _large_strings(table).sort_by([("photo_id", "ascending")])
+
+
+def _large_strings(table: pa.Table) -> pa.Table:
+    """Return the table with 64-bit string offsets: a column of tens of millions of texts
+    passes the 2 GB of `string` when a sort or a take joins its chunks."""
+    schema = pa.schema(
+        f.with_type(pa.large_string()) if pa.types.is_string(f.type) else f for f in table.schema
+    )
+    return table.cast(schema)
 
 
 def groups(taxon_ids: pa.Array | pa.ChunkedArray, taxa: pa.Table) -> pa.Array:

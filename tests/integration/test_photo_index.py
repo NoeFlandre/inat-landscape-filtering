@@ -1,6 +1,7 @@
 """Streaming photo index: taxa scan, per-cell counts, capped selection, uuid keys."""
 
 import io
+import uuid
 
 import numpy as np
 import pyarrow as pa
@@ -155,3 +156,9 @@ def test_sorted_lookup_matches_isin(values, selected):
     values_a = np.array(values, dtype=np.uint64)
     selected_a = np.unique(np.array(selected, dtype=np.uint64))
     assert _sorted_in(values_a, selected_a).tolist() == np.isin(values_a, selected_a).tolist()
+
+
+def test_uuid_keys_accept_large_strings():
+    uuids = [str(uuid.UUID(int=i * 7919 + 1, version=4)) for i in range(5)]
+    large = pa.array(uuids, pa.large_string())
+    assert uuid_keys(large).tolist() == [uuid_key(u) for u in uuids]

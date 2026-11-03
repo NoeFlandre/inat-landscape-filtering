@@ -189,3 +189,12 @@ def test_vectorized_groups_equal_the_domain_rule(rows):
     ids = [r[0] for r in rows]
     expected = [classify(t, ancestry.get(t)).value for t in ids]
     assert groups(pa.array(ids, pa.int64()), taxa).to_pylist() == expected
+
+
+def test_candidate_text_columns_are_large_strings(tmp_path):
+    # Bug: with 74 M photos a string column passed 2 GB, and sorting it failed with
+    # "offset overflow". Large strings have 64-bit offsets.
+    table = _run(tmp_path, [])
+    text = [f.name for f in table.schema if pa.types.is_large_string(f.type)]
+    assert {"photo_uuid", "observation_uuid", "taxon_name", "attribution", "group"} <= set(text)
+    assert not any(pa.types.is_string(f.type) for f in table.schema)
