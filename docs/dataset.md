@@ -18,7 +18,7 @@ embeddings/siglip2-base-patch16-224/small/*.parquet   photo_id and float16 embed
 | `photo_id`, `photo_uuid`, `observation_uuid` | iNaturalist identifiers |
 | `latitude`, `longitude`, `positional_accuracy` | location of the observation, accuracy in metres |
 | `observed_on` | date of the observation |
-| `taxon_id`, `taxon_name`, `group` | taxon; `group` is `plantae` or `unidentified` |
+| `taxon_id`, `taxon_name`, `group` | taxon; `group` is the kingdom (`animalia`, `plantae`, `fungi`, …), `unidentified` or `other` |
 | `quality_grade`, `anomaly_score` | iNaturalist quality data |
 | `position` | position of the photo in its observation (0 is the first photo) |
 | `width`, `height`, `extension` | size and format of the original photo |

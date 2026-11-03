@@ -104,9 +104,8 @@ def _covers(stored: dict | None, params: IngestParams) -> bool:
 
 
 def eligible_taxa(taxa: pa.Table) -> NDArray[np.int64]:
-    """Return the sorted ids of the taxa that the dataset keeps."""
-    pairs = zip(taxa["taxon_id"].to_pylist(), taxa["ancestry"].to_pylist(), strict=True)
-    return np.array(sorted(t for t, a in pairs if classify(t, a) is not None), dtype=np.int64)
+    """Return the sorted ids of the taxa that the dataset keeps: all of them (ADR 0004)."""
+    return np.sort(taxa["taxon_id"].to_numpy(zero_copy_only=False).astype(np.int64))
 
 
 def _taxa(workdir: Path, source: str, opener: Opener) -> pa.Table:
@@ -120,7 +119,7 @@ def _taxa(workdir: Path, source: str, opener: Opener) -> pa.Table:
 
 
 def build_candidates(dump: DumpSlice, selected: pa.Table) -> pa.Table:
-    """Join the dump tables, add the H3 cell, and keep photos of the kept taxon groups."""
+    """Join the dump tables, and add the H3 cell and the taxon group of each photo."""
     taxa = dump.taxa.rename_columns(["taxon_id", "ancestry", "taxon_name"])
     observers = dump.observers.rename_columns(["observer_id", "login", "observer_name"])
     table = (
@@ -133,8 +132,8 @@ def build_candidates(dump: DumpSlice, selected: pa.Table) -> pa.Table:
         classify(t, a)
         for t, a in zip(table["taxon_id"].to_pylist(), table["ancestry"].to_pylist(), strict=True)
     ]
-    table = table.append_column("group", pa.array([g and g.value for g in groups], pa.string()))
-    table = table.filter(pc.is_valid(table["group"])).drop_columns(["ancestry"])
+    table = table.append_column("group", pa.array([g.value for g in groups], pa.string()))
+    table = table.drop_columns(["ancestry"])
     table = table.set_column(
         table.schema.get_field_index("license"), "license", pc.utf8_upper(table["license"])
     )

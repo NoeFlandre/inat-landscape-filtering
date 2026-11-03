@@ -24,7 +24,7 @@ def test_keeps_only_selected_observations():
 
 
 def test_keeps_selected_photos_with_allowed_licence():
-    assert sorted(_read().photos["photo_id"].to_pylist()) == [101, 102, 103, 105, 107]
+    assert sorted(_read().photos["photo_id"].to_pylist()) == [101, 102, 103, 107]  # 105: CC-BY-SA
 
 
 def test_keeps_only_referenced_taxa_and_observers():
@@ -44,7 +44,7 @@ def test_parses_quoted_names_and_empty_values():
 
 def test_ignores_unknown_members():
     members = dict(fakes.DEFAULT_MEMBERS) | {"README.txt": ["hello"]}
-    assert _read(members).photos.num_rows == 5
+    assert _read(members).photos.num_rows == 4
 
 
 def test_photos_before_observations_is_an_error():
@@ -66,14 +66,14 @@ def test_missing_member_is_an_error():
 def test_skips_malformed_rows():
     members = dict(fakes.DEFAULT_MEMBERS)
     members["photos.csv"] = [*members["photos.csv"], "broken\trow"]
-    assert _read(members).photos.num_rows == 5
+    assert _read(members).photos.num_rows == 4
 
 
 def test_open_source_reads_local_path(tmp_path):
     path = tmp_path / "dump.tar.gz"
     path.write_bytes(fakes.make_dump())
     with open_source(str(path)) as stream:
-        assert read_dump(stream, ALL).photos.num_rows == 5
+        assert read_dump(stream, ALL).photos.num_rows == 4
 
 
 def test_open_source_uses_urlopen_for_https(monkeypatch):

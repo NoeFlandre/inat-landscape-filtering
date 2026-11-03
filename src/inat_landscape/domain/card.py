@@ -83,7 +83,11 @@ def fields(n_prompts: int) -> tuple[Field, ...]:
         Field(
             ("taxon_id", "taxon_name"), "int / string", "Taxon of the observation (empty if none)"
         ),
-        Field(("group",), "string", "`plantae` or `unidentified`"),
+        Field(
+            ("group",),
+            "string",
+            "kingdom (`animalia`, `plantae`, `fungi`, …), `unidentified` or `other`",
+        ),
         Field(("quality_grade",), "string", "`research`, `needs_id` or `casual`"),
         Field(("anomaly_score",), "float", "iNaturalist location anomaly score (often empty)"),
         Field(("position",), "int", "Position of the photo in its observation (0 is the first)"),
@@ -181,13 +185,13 @@ def _yaml(info: CardInfo) -> str:
 def _intro(info: CardInfo) -> str:
     low = info.subsets[0]
     return f"""
-![iNaturalist Landscape Filtering: a deterministic sample of iNaturalist photos of plants and \
-unidentified observations is scored for landscape content by SigLIP2; photos above each \
+![iNaturalist Landscape Filtering: a deterministic sample of iNaturalist photos of all taxa \
+is scored for landscape content by SigLIP2; photos above each \
 threshold keep their image](assets/hero.png)
 
 # iNaturalist Landscape Filtering
 
-**{info.total:,} iNaturalist photos of plants and unidentified observations \
+**{info.total:,} iNaturalist photos of all taxa \
 ({info.total - info.no_location:,} with a location), each with a zero-shot SigLIP2 score \
 that tells if the photo shows a landscape.**
 
@@ -359,8 +363,8 @@ deterministic. Photos are in (observation UUID, photo position, photo id) order.
 {_CELL_AREAS.get(info.h3_res, "see H3")}), only the first {info.embed_cap:,} photos in that \
 order are kept, so dense areas do not dominate; a larger cap keeps a superset. Photos with no \
 location are left out. This gave {info.candidates:,} photos.
-3. **Taxa.** Only Plantae (taxon 47126 and its descendants) and observations with no taxon \
-or the root taxon Life. Habitat and vegetation photos are frequent there.
+3. **Taxa.** All taxa. `group` is the kingdom of the taxon, `unidentified` for an \
+observation with no taxon or the root taxon Life, or `other` for a taxon with no known kingdom.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data \
 bucket.
 5. **Embeddings.** The `small` photo (240 px longest side) goes through \

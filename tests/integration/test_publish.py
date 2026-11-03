@@ -102,9 +102,7 @@ def test_card_figures_and_upload(scored):
     _publish(workdir, hub, (0.0,))
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "config_name: score_ge_0_00" in card
-    assert (
-        "**4 iNaturalist photos of plants and unidentified observations (4 with a location)" in card
-    )
+    assert "**4 iNaturalist photos of all taxa (4 with a location)" in card
     assert "| plantae | 2 | 2 |" in card
     assert "This gave 4 photos." in card
     assert "All 4 sample photos are scored." in card

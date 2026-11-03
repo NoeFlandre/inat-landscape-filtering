@@ -89,7 +89,7 @@ def test_force_reruns_index_and_details(tmp_path):
     assert len(calls) == 5
 
 
-def test_eligible_taxa_are_plants_and_life():
+def test_every_taxon_is_eligible():
     taxa = pa.table(
         {
             "taxon_id": [3, 47126, 48460, 52775],
@@ -97,7 +97,7 @@ def test_eligible_taxa_are_plants_and_life():
             "name": ["Aves", "Plantae", "Life", "x"],
         }
     )
-    assert eligible_taxa(taxa).tolist() == [47126, 48460, 52775]
+    assert eligible_taxa(taxa).tolist() == [3, 47126, 48460, 52775]
     assert eligible_taxa(taxa).dtype == np.int64
 
 

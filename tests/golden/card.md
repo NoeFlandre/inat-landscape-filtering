@@ -28,11 +28,11 @@ configs:
     path: embeddings/siglip2-base-patch16-224/small/*.parquet
 ---
 
-![iNaturalist Landscape Filtering: a deterministic sample of iNaturalist photos of plants and unidentified observations is scored for landscape content by SigLIP2; photos above each threshold keep their image](assets/hero.png)
+![iNaturalist Landscape Filtering: a deterministic sample of iNaturalist photos of all taxa is scored for landscape content by SigLIP2; photos above each threshold keep their image](assets/hero.png)
 
 # iNaturalist Landscape Filtering
 
-**10 iNaturalist photos of plants and unidentified observations (8 with a location), each with a zero-shot SigLIP2 score that tells if the photo shows a landscape.**
+**10 iNaturalist photos of all taxa (8 with a location), each with a zero-shot SigLIP2 score that tells if the photo shows a landscape.**
 
 **4 photos reach the lowest threshold (0.1 on `score_landscape`, at most 100 per H3 cell) and come with their 500 px image. All 10 come with a 768-dimension [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224) image embedding.**
 
@@ -101,7 +101,7 @@ Score quantiles, over all 10 photos:
 | `positional_accuracy` | int | Accuracy of the location, in metres (often empty) |
 | `observed_on` | string | Date of the observation (`YYYY-MM-DD`) |
 | `taxon_id`, `taxon_name` | int / string | Taxon of the observation (empty if none) |
-| `group` | string | `plantae` or `unidentified` |
+| `group` | string | kingdom (`animalia`, `plantae`, `fungi`, …), `unidentified` or `other` |
 | `quality_grade` | string | `research`, `needs_id` or `casual` |
 | `anomaly_score` | float | iNaturalist location anomaly score (often empty) |
 | `position` | int | Position of the photo in its observation (0 is the first) |
@@ -147,7 +147,7 @@ Each score is `sigmoid(scale * cosine + bias)` between the image embedding and a
 
 1. **Source.** The metadata dump [`inaturalist-open-data-20261027.tar.gz`](https://x/metadata/inaturalist-open-data-20261027.tar.gz) is read once as a stream (36.7 GB compressed); it is not stored.
 2. **Sample.** An observation is in the sample when the first 8 hex digits of its UUID are below `0.001 * 16^8`. UUID v4 values are random, so the sample is random and deterministic. Photos are in (observation UUID, photo position, photo id) order. Within each [H3](https://h3geo.org) cell (resolution 5, about 250 km²), only the first 1,000 photos in that order are kept, so dense areas do not dominate; a larger cap keeps a superset. Photos with no location are left out. This gave 1,234 photos.
-3. **Taxa.** Only Plantae (taxon 47126 and its descendants) and observations with no taxon or the root taxon Life. Habitat and vegetation photos are frequent there.
+3. **Taxa.** All taxa. `group` is the kingdom of the taxon, `unidentified` for an observation with no taxon or the root taxon Life, or `other` for a taxon with no known kingdom.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data bucket.
 5. **Embeddings.** The `small` photo (240 px longest side) goes through [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224). Download and decode cost more than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).

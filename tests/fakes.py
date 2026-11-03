@@ -38,7 +38,7 @@ PHOTOS = [
     f"p-2\t102\t{OBS_PLANT}\t10\tjpeg\tCC0\t240\t180\t1",
     f"p-3\t103\t{OBS_NO_ID}\t11\tjpg\tCC-BY-NC\t180\t240\t0",
     f"p-4\t104\t{OBS_NO_ID}\t11\tjpg\tCC-BY-SA\t180\t240\t1",  # licence not kept
-    f"p-5\t105\t{OBS_BIRD}\t10\tjpg\tCC-BY\t240\t180\t0",  # bird
+    f"p-5\t105\t{OBS_BIRD}\t10\tjpg\tCC-BY-SA\t240\t180\t0",  # bird, licence not kept
     f"p-6\t106\t{OBS_PLANT_OUT}\t12\tjpg\tCC-BY\t240\t180\t0",  # not sampled
     f"p-7\t107\t{OBS_LIFE}\t12\tpng\tcc-by\t240\t240\t0",
 ]

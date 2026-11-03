@@ -1,21 +1,21 @@
 # ADR 0004: Taxa in scope
 
-Status: accepted (2026-11-02)
+Status: accepted (2026-11-02), changed (2026-11-03)
 
 ## Context
 
 Most iNaturalist photos are close views of organisms. Landscape photos are rare.
 Some taxon groups almost never have landscape photos (for example insects).
 
+The first run kept only Plantae and the observations with no taxon. The cap-10 dataset of that run showed that the scores and the thresholds separate landscape photos from close views well. Landscape photos are also in observations of animals and fungi (for example a habitat photo of a bird observation).
+
 ## Decision
 
-For the first run, keep only:
-
-- Plantae (taxon 47126 and its descendants). Habitat and vegetation photos are frequent in this group.
-- Observations with no taxon, or with the root taxon Life (48460). Users often upload a view with no organism to identify.
+- Keep all taxa.
+- `group` is the kingdom of the taxon: `animalia`, `plantae`, `fungi`, `chromista`, `protozoa`, `bacteria`, `archaea` or `viruses`. Observations with no taxon, or with the root taxon Life (48460), are `unidentified`. A taxon with no known kingdom in its ancestry is `other`.
 
 ## Consequences
 
-- The scope is small and has a high share of landscape photos.
-- Birds and mammals are the first candidates for the next extension.
+- The pool is larger: the cap per H3 cell (ADR 0007) sets the cost of the embeddings.
+- A user can select a group with a filter on `group`.
 - The rule is in `domain/taxa.py`. A change of scope is a change in one place.

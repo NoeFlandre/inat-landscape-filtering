@@ -1,10 +1,10 @@
-"""Taxa filter: keep Plantae and unidentified observations only."""
+"""Taxon groups: every observation is kept, in the group of its kingdom."""
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.taxa import LIFE, PLANTAE, Group, classify
+from inat_landscape.domain.taxa import KINGDOMS, LIFE, PLANTAE, Group, classify
 
 
 def test_missing_taxon_is_unidentified():
@@ -24,21 +24,44 @@ def test_plant_descendant_is_plantae():
 
 
 @pytest.mark.parametrize(
+    ("taxon_id", "ancestry", "group"),
+    [
+        (3, "48460/1/2355/3", Group.ANIMALIA),  # bird
+        (47170, "48460", Group.FUNGI),
+        (48222, "48460", Group.CHROMISTA),
+        (47686, "48460", Group.PROTOZOA),
+        (67333, "48460", Group.BACTERIA),
+        (151817, "48460", Group.ARCHAEA),
+        (131236, "48460", Group.VIRUSES),
+    ],
+)
+def test_other_kingdoms_are_kept_in_their_group(taxon_id, ancestry, group):
+    assert classify(taxon_id, ancestry) is group
+
+
+@pytest.mark.parametrize(
     ("taxon_id", "ancestry"),
     [
-        (3, "48460/1/2355/3"),  # bird
-        (47170, "48460/47170"),  # fungi
-        (999, "48460/1/471260"),  # id that only contains 47126 as a substring
+        (999, "48460/471260/11"),  # ids that only contain 1 or 47126 as a substring
         (999, None),  # unknown ancestry
     ],
 )
-def test_other_taxa_are_excluded(taxon_id, ancestry):
-    assert classify(taxon_id, ancestry) is None
+def test_a_taxon_of_no_known_kingdom_is_other(taxon_id, ancestry):
+    assert classify(taxon_id, ancestry) is Group.OTHER
+
+
+def test_every_kingdom_has_a_group():
+    assert {Group(name) for name in KINGDOMS.values()} <= set(Group)
 
 
 ancestries = st.lists(st.integers(1, 10**6), min_size=1, max_size=8).map(
     lambda ids: "/".join(map(str, ids))
 )
+
+
+@given(st.integers(1, 10**6), ancestries)
+def test_every_observation_has_a_group(taxon_id, ancestry):
+    assert classify(taxon_id, ancestry) in set(Group)
 
 
 @given(st.integers(1, 10**6), ancestries)
