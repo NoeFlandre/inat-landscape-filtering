@@ -1,11 +1,14 @@
 """Append-only embedding shards, kept locally and mirrored to the hub.
 
 The shards are the only record of which photos have an embedding. Before a run, the
-store pulls the remote shards, so no photo is embedded twice, even on a new machine.
+store reads the photo ids of the remote shards, so no photo is embedded twice, even on a new
+machine. A worker slot tags its shards (`part-w1of4-…`) and reads the ids of its own shards
+and of the untagged ones only: this is the work that can overlap with its own.
 """
 
 import hashlib
-from collections.abc import Sequence
+import shutil
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -19,22 +22,15 @@ from inat_landscape.adapters.hub import Hub
 class EmbeddingStore:
     """Embedding shards under `root / remote_dir`, mirrored at `remote_dir` on the hub."""
 
-    def __init__(self, root: Path, remote_dir: str, hub: Hub) -> None:
+    def __init__(self, root: Path, remote_dir: str, hub: Hub, *, tag: str = "") -> None:
         self.root = root
         self.remote_dir = remote_dir.strip("/")
         self.hub = hub
+        self.tag = tag
 
     @property
     def local_dir(self) -> Path:
         return self.root / self.remote_dir
-
-    def pull(self) -> int:
-        """Download remote shards that are not local yet. Return how many."""
-        remote = set(self._remote_shards())
-        missing = sorted(p for p in remote if not (self.root / p).exists())
-        for path in missing:
-            self.hub.download(path, self.root)
-        return len(missing)
 
     def push(self) -> int:
         """Upload local shards that are not on the hub yet. Return how many."""
@@ -47,6 +43,33 @@ class EmbeddingStore:
 
     def _remote_shards(self) -> list[str]:
         return [p for p in self.hub.list_files(self.remote_dir + "/") if p.endswith(".parquet")]
+
+    def remote_ids(self) -> set[int]:
+        """Return the ids of the remote shards of this tag and of the untagged shards.
+
+        Only the `photo_id` column is read: no shard is stored.
+        """
+        return {
+            i for path in self._remote_shards() if self._mine(path) for i in self.hub.read_ids(path)
+        }
+
+    def _mine(self, path: str) -> bool:
+        name = path.rsplit("/", 1)[-1]
+        return not self.tag or not name.startswith("part-w") or name.startswith(f"part-{self.tag}-")
+
+    def stream(self) -> Iterator[tuple[list[int], np.ndarray]]:
+        """Yield the ids and float16 embeddings of each shard, one shard at a time.
+
+        Local shards are read in place. A remote shard with no local copy is downloaded, read
+        and deleted, so the disk keeps one remote shard at most.
+        """
+        local = {str(p.relative_to(self.root)): p for p in self._shards()}
+        staging = self.root / ".stream"
+        for path in sorted(set(local) | set(self._remote_shards())):
+            table = read_table(local.get(path) or self.hub.download(path, staging))
+            shutil.rmtree(staging, ignore_errors=True)
+            rows = table["embedding"].combine_chunks().flatten().to_numpy()
+            yield table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
 
     def done_ids(self) -> set[int]:
         """Return the ids of all photos that have an embedding."""
@@ -61,7 +84,8 @@ class EmbeddingStore:
         if len(photo_ids) != len(embeddings):
             raise ValueError("photo_ids and embeddings differ in length")
         digest = hashlib.sha256(np.asarray(photo_ids, np.int64).tobytes()).hexdigest()[:16]
-        name = f"{self.remote_dir}/part-{digest}.parquet"
+        prefix = f"part-{self.tag}-" if self.tag else "part-"
+        name = f"{self.remote_dir}/{prefix}{digest}.parquet"
         path = self.root / name
         flat = pa.array(np.asarray(embeddings, np.float16).ravel())
         column = pa.FixedSizeListArray.from_arrays(flat, embeddings.shape[1])
@@ -71,43 +95,5 @@ class EmbeddingStore:
         self.hub.upload_file(path, name, f"Add {len(photo_ids)} embeddings")
         return path
 
-    def load(self) -> tuple[list[int], np.ndarray]:
-        """Return all ids and the float16 embeddings (as stored). Each id appears once.
-
-        The shards are copied one by one into one preallocated array, so the memory peak is
-        the array plus one shard.
-        """
-        shards = self._shards()
-        if not shards:
-            return [], np.zeros((0, 0), np.float16)
-        ids, matrix = self._read_into_one_array(shards)
-        first = _first_positions(ids)
-        if len(first) == len(ids):
-            return ids, matrix
-        return [ids[n] for n in first], matrix[first]
-
-    def _read_into_one_array(self, shards: list[Path]) -> tuple[list[int], np.ndarray]:
-        counts = [pq.ParquetFile(s).metadata.num_rows for s in shards]
-        matrix = np.empty((sum(counts), self.dim()), np.float16)
-        ids: list[int] = []
-        start = 0
-        for shard in shards:
-            table = read_table(shard)
-            rows = table["embedding"].combine_chunks().flatten().to_numpy()
-            matrix[start : start + table.num_rows] = rows.reshape(table.num_rows, -1)
-            ids += table["photo_id"].to_pylist()
-            start += table.num_rows
-        return ids, matrix
-
-    def dim(self) -> int:
-        """Return the embedding length, or 0 when the store is empty."""
-        shards = self._shards()
-        return pq.read_schema(shards[0]).field("embedding").type.list_size if shards else 0
-
     def _shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))
-
-
-def _first_positions(ids: list[int]) -> list[int]:
-    """Return, in order, the position of the first copy of each id."""
-    return sorted({i: n for n, i in reversed(list(enumerate(ids)))}.values())

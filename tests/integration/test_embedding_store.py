@@ -21,7 +21,7 @@ def test_add_writes_float16_shard_and_uploads(tmp_path, hub):
     path = store.add([3, 1], np.array([[1, 2], [3, 4]], np.float32))
     assert path.parent == store.local_dir
     assert hub.uploads == [f"{DIR}/{path.name}"]
-    ids, emb = store.load()
+    [(ids, emb)] = list(store.stream())
     assert ids == [3, 1]
     assert emb.dtype == np.float16
     assert emb.tolist() == [[1, 2], [3, 4]]
@@ -33,28 +33,18 @@ def test_shard_name_is_deterministic(tmp_path):
     assert a.name == b.name
 
 
-def test_new_machine_pulls_remote_shards_and_sees_done_ids(tmp_path, hub):
+def test_new_machine_sees_the_remote_ids_and_has_no_local_shard(tmp_path, hub):
     EmbeddingStore(tmp_path / "first", DIR, hub).add([1, 2], np.ones((2, 3)))
     second = EmbeddingStore(tmp_path / "second", DIR, hub)
     assert second.done_ids() == set()
-    assert second.pull() == 1
-    assert second.done_ids() == {1, 2}
-    assert second.pull() == 0
+    assert second.remote_ids() == {1, 2}
 
 
-def test_load_keeps_first_copy_of_duplicate_ids(tmp_path):
+def test_stream_reads_local_shards_in_place(tmp_path):
     store = EmbeddingStore(tmp_path, DIR, OfflineHub())
     store.add([1, 2], np.array([[1.0], [2.0]]))
-    store.add([2, 3], np.array([[9.0], [3.0]]))
-    ids, emb = store.load()
-    assert sorted(ids) == [1, 2, 3]
-    assert len(emb) == 3
-
-
-def test_load_empty_store(tmp_path):
-    ids, emb = EmbeddingStore(tmp_path, DIR, OfflineHub()).load()
-    assert ids == []
-    assert emb.shape == (0, 0)
+    assert [ids for ids, _ in store.stream()] == [[1, 2]]
+    assert store.done_ids() == {1, 2}  # the local shard is kept
 
 
 def test_add_rejects_length_mismatch(tmp_path):
@@ -72,8 +62,29 @@ def test_push_uploads_only_local_shards_missing_on_remote(tmp_path, hub):
     assert len(hub.uploads) == 2
 
 
-def test_dim_is_the_embedding_length(tmp_path):
-    store = EmbeddingStore(tmp_path, DIR, OfflineHub())
-    assert store.dim() == 0
-    store.add([1], np.ones((1, 5)))
-    assert store.dim() == 5
+def test_a_tagged_store_names_its_shards_with_the_tag(tmp_path):
+    store = EmbeddingStore(tmp_path, DIR, OfflineHub(), tag="w1of4")
+    assert store.add([1], np.ones((1, 2))).name.startswith("part-w1of4-")
+
+
+def test_remote_ids_read_the_untagged_shards_and_the_shards_of_the_tag_only(tmp_path, hub):
+    EmbeddingStore(tmp_path / "old", DIR, hub).add([1, 2], np.ones((2, 2)))
+    EmbeddingStore(tmp_path / "a", DIR, hub, tag="w0of2").add([4], np.ones((1, 2)))
+    EmbeddingStore(tmp_path / "b", DIR, hub, tag="w1of2").add([3], np.ones((1, 2)))
+    fresh = EmbeddingStore(tmp_path / "new", DIR, hub, tag="w0of2")
+    assert fresh.remote_ids() == {1, 2, 4}
+    assert not fresh.local_dir.exists()  # only the photo_id column is read, nothing is stored
+    assert EmbeddingStore(tmp_path / "all", DIR, hub).remote_ids() == {1, 2, 3, 4}
+
+
+def test_stream_yields_each_remote_shard_once_and_keeps_no_copy(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub, tag="w0of2").add([1, 2], np.ones((2, 3)))
+    EmbeddingStore(tmp_path / "b", DIR, hub).add([3], np.zeros((1, 3)))
+    store = EmbeddingStore(tmp_path / "c", DIR, hub)
+    parts = sorted((ids, emb.shape, emb.dtype) for ids, emb in store.stream())
+    assert parts == [([1, 2], (2, 3), np.float16), ([3], (1, 3), np.float16)]
+    assert not list((tmp_path / "c").rglob("*.parquet"))
+
+
+def test_stream_of_an_empty_store_yields_nothing(tmp_path, hub):
+    assert list(EmbeddingStore(tmp_path, DIR, hub).stream()) == []

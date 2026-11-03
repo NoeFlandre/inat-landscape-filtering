@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import cast
 
 import httpx
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+from fsspec.implementations.dirfs import DirFileSystem
+from fsspec.implementations.local import LocalFileSystem
 from huggingface_hub import HfApi
 from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
@@ -95,3 +99,19 @@ def test_delete_folder_ignores_a_missing_folder():
     hub.delete_folder("missing", "m")
     assert ("delete_folder", "data/x") in api.calls
     OfflineHub().delete_folder("data/x", "m")
+
+
+def test_read_ids_reads_the_photo_id_column_of_a_remote_parquet(tmp_path, monkeypatch):
+    path = tmp_path / "datasets" / "o" / "r" / "e" / "part-1.parquet"
+    path.parent.mkdir(parents=True)
+    pq.write_table(pa.table({"photo_id": [5, 6], "embedding": [[1.0], [2.0]]}), path)
+    monkeypatch.setattr(
+        "inat_landscape.adapters.hub.HfFileSystem",
+        lambda **_: DirFileSystem(path=str(tmp_path), fs=LocalFileSystem()),
+    )
+    assert HfHub("o/r", api=cast(HfApi, FakeApi())).read_ids("e/part-1.parquet") == [5, 6]
+
+
+def test_offline_hub_cannot_read_ids():
+    with pytest.raises(FileNotFoundError, match="offline"):
+        OfflineHub().read_ids("e/part-1.parquet")

@@ -197,3 +197,13 @@ def test_workers_skip_the_permanent_failures_of_the_shared_failure_file(setup):
     assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 0
     report = _embed(workdir, hub, FakeEncoder(), worker=(0, 2))
     assert (report.embedded, report.failed, report.skipped) == (0, 0, 1)
+
+
+def test_a_worker_tags_its_shards_and_reads_no_other_tagged_shard(setup):
+    workdir, handler, hub = setup
+    serve_photos(handler)
+    _embed(workdir, hub, FakeEncoder(), worker=(1, 2))
+    names = [p.rsplit("/", 1)[-1] for p in hub.list_files("embeddings/")]
+    assert names
+    assert all(n.startswith("part-w1of2-") for n in names)
+    assert plan_embed(workdir, FakeEncoder.model_id, hub, worker=(0, 2)) == 1  # 102 only

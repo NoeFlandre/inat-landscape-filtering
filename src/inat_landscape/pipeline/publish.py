@@ -11,14 +11,13 @@ import pyarrow.compute as pc
 from PIL import Image
 
 from inat_landscape.adapters import figures
-from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import (
     read_json,
     read_table,
     write_table,
 )
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
-from inat_landscape.adapters.hub import REPO_ID, Hub, OfflineHub
+from inat_landscape.adapters.hub import REPO_ID, Hub
 from inat_landscape.adapters.images import decode, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
@@ -31,7 +30,7 @@ from inat_landscape.pipeline.embed import HUB_DIR, SCORING_SIZE, embedding_dir, 
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES, MANIFEST
 from inat_landscape.pipeline.ports import Fetcher
-from inat_landscape.pipeline.score import SCORE, SCORED
+from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
 IMAGE_SIZE = "medium"
 PART = "part-00000.parquet"
@@ -177,7 +176,7 @@ def _card_info(
 ) -> CardInfo:
     stored = read_json(workdir / MANIFEST) or {}
     params = _params(workdir)
-    store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), OfflineHub())
+    embeddings = read_json(workdir / EMBEDDINGS) or {}
     kept = [m.tolist() for _, m in published]
     return CardInfo(
         repo_id=repo_id,
@@ -195,8 +194,8 @@ def _card_info(
         quantiles=key_quantiles(table[spec.score].to_pylist()),
         years=_years(table),
         embedding_dir=embedding_dir(model_id),
-        embedding_dim=store.dim(),
-        embedding_rows=len(store.done_ids()),
+        embedding_dim=embeddings.get("embedding_dim", 0),
+        embedding_rows=embeddings.get("embedding_rows", 0),
         no_location=table["latitude"].null_count,
         score=spec.score,
         cap_per_cell=spec.cap_per_cell,

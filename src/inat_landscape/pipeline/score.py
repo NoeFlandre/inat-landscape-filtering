@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from inat_landscape.adapters.files import read_rows, write_table
+from inat_landscape.adapters.embedding_store import EmbeddingStore
+from inat_landscape.adapters.files import read_rows, write_json, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.scoring import (
     CLOSEUP_PROMPTS,
@@ -22,36 +23,62 @@ from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.sample import SAMPLE
 
 SCORED = "scored.parquet"
+EMBEDDINGS = "embeddings.json"  # count and length of the scored embeddings
 SCORE = "score_landscape"
 SCORE_ROWS = 20_000  # embeddings scored at a time, to bound the memory
 
 
 def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
-    """Write and return the sample photos that have an embedding, with their scores."""
-    table, images, order = _embedded_sample(workdir, encoder.model_id, hub)
+    """Write and return the sample photos that have an embedding, with their scores.
+
+    The shards are scored one at a time (ADR 0011: tens of millions of embeddings do not fit
+    in memory). `embeddings.json` keeps the count and the length of the embeddings.
+    """
+    sample_ids = read_sample(workdir, columns=["photo_id"])["photo_id"].to_numpy()
+    store = open_store(workdir, encoder.model_id, hub)
     directions = _directions(encoder)
-    parts = [
-        _score_columns(images[order[i : i + SCORE_ROWS]], directions, encoder)
-        for i in range(0, len(order), SCORE_ROWS)
-    ]
-    for name in parts[0]:
-        table = table.append_column(name, pa.array(np.concatenate([p[name] for p in parts])))
+    ids, scores, dim = _score_shards(store, directions, encoder)
+    if not len(ids):
+        raise StageError("no embeddings: run `embed` first")
+    write_json({"embedding_rows": len(ids), "embedding_dim": dim}, workdir / EMBEDDINGS)
+    keep = np.isin(ids, sample_ids)
+    ids, scores = ids[keep], {name: column[keep] for name, column in scores.items()}
+    table = read_rows(workdir / SAMPLE, "photo_id", ids.tolist())
+    sorter = np.argsort(ids)
+    where = sorter[np.searchsorted(ids[sorter], table["photo_id"].to_numpy())]
+    for name, column in scores.items():
+        table = table.append_column(name, pa.array(column[where]))
     write_table(table, workdir / SCORED)
     return table
 
 
-def _embedded_sample(
-    workdir: Path, model_id: str, hub: Hub
-) -> tuple[pa.Table, np.ndarray, np.ndarray]:
-    """Return the sample rows that have an embedding, all embeddings, and for each row the
-    position of its embedding. No full copy of the embeddings is made."""
-    ids, embeddings = open_store(workdir, model_id, hub).load()
+def _score_shards(
+    store: EmbeddingStore, directions: dict[str, tuple[str, np.ndarray]], encoder: Encoder
+) -> tuple[np.ndarray, dict[str, np.ndarray], int]:
+    """Score every shard. Return the ids (first copy of each), their scores and the length."""
+    ids: list[np.ndarray] = []
+    parts: list[dict[str, np.ndarray]] = []
+    dim = 0
+    for shard_ids, embeddings in store.stream():
+        dim = embeddings.shape[1]
+        ids.append(np.asarray(shard_ids, np.int64))
+        parts.extend(
+            _score_columns(embeddings[i : i + SCORE_ROWS], directions, encoder)
+            for i in range(0, len(shard_ids), SCORE_ROWS)
+        )
+    return (*_first_copies(ids, parts), dim)
+
+
+def _first_copies(
+    ids: list[np.ndarray], parts: list[dict[str, np.ndarray]]
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Return the ids and the scores of the first copy of each id."""
     if not ids:
-        raise StageError("no embeddings: run `embed` first")
-    read_sample(workdir, columns=["photo_id"])  # fails clearly if the sample is missing
-    table = read_rows(workdir / SAMPLE, "photo_id", ids)
-    row = {photo_id: n for n, photo_id in enumerate(ids)}
-    return table, embeddings, np.array([row[i] for i in table["photo_id"].to_pylist()])
+        return np.zeros(0, np.int64), {}
+    all_ids = np.concatenate(ids)
+    _, first = np.unique(all_ids, return_index=True)
+    first.sort()
+    return all_ids[first], {n: np.concatenate([p[n] for p in parts])[first] for n in parts[0]}
 
 
 def _directions(encoder: Encoder) -> dict[str, tuple[str, np.ndarray]]:

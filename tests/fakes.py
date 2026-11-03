@@ -7,6 +7,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 
 OBS_HEADER = (
     "observation_uuid\tobserver_id\tlatitude\tlongitude\tpositional_accuracy\t"
@@ -90,6 +91,9 @@ class FakeHub:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes((self.remote / path).read_bytes())
         return dest
+
+    def read_ids(self, path: str) -> list[int]:
+        return pq.read_table(self.remote / path, columns=["photo_id"])["photo_id"].to_pylist()
 
     def upload_file(self, local: Path, path: str, message: str) -> None:
         dest = self.remote / path

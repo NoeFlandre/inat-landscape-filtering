@@ -58,12 +58,17 @@ def photo_url(photo_id: int, size: str, extension: str) -> str:
     return PHOTO_URL.format(photo_id=photo_id, size=size, extension=extension)
 
 
-def open_store(workdir: Path, model_id: str, hub: Hub) -> EmbeddingStore:
-    """Return the embedding store of `model_id`, synced both ways with the hub."""
-    store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), hub)
-    store.pull()
+def open_store(workdir: Path, model_id: str, hub: Hub, *, tag: str = "") -> EmbeddingStore:
+    """Return the embedding store of `model_id`, after the upload of its local shards."""
+    store = EmbeddingStore(workdir / HUB_DIR, embedding_dir(model_id), hub, tag=tag)
     store.push()
     return store
+
+
+def worker_tag(worker: tuple[int, int]) -> str:
+    """Return the shard tag of a worker slot: `w1of4`, or no tag for a single worker."""
+    index, count = worker
+    return f"w{index}of{count}" if count > 1 else ""
 
 
 def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
@@ -88,8 +93,8 @@ def _work(workdir: Path, model_id: str, hub: Hub, worker: tuple[int, int]) -> _W
     sample = read_sample(workdir, columns=["photo_id", "extension"])  # small, for parallel workers
     mine = [for_worker(i, *worker) for i in sample["photo_id"].to_pylist()]
     sample = sample.filter(pa.array(mine, pa.bool_()))
-    store = open_store(workdir, model_id, hub)
-    done = store.done_ids()
+    store = open_store(workdir, model_id, hub, tag=worker_tag(worker))
+    done = store.remote_ids() | store.done_ids()
     failures = _read_failures(workdir / failures_name(worker))
     # The shared failure file (from `state pull`) also lists the known permanent failures.
     shared = _read_failures(workdir / FAILURES) if worker[1] > 1 else {}

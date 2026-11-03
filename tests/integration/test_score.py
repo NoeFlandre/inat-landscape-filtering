@@ -1,13 +1,15 @@
 """Score stage."""
 
+import json
+
 import numpy as np
 import pytest
 
 from inat_landscape.adapters.images import fetch
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
-from inat_landscape.pipeline.embed import run_embed
+from inat_landscape.pipeline.embed import HUB_DIR, open_store, run_embed
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.score import SCORED, run_score
+from inat_landscape.pipeline.score import EMBEDDINGS, SCORED, run_score
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
 
@@ -62,3 +64,19 @@ def test_scores_do_not_depend_on_the_scoring_chunk(embedded, monkeypatch):
             assert np.allclose(whole[name].to_numpy(), chunked[name].to_numpy(), atol=1e-12)
         else:
             assert whole[name].equals(chunked[name]), name
+
+
+def test_score_streams_the_shards_from_a_new_machine_and_keeps_the_first_copy(embedded, tmp_path):
+    workdir, hub = embedded
+    other = tmp_path / "other"
+    prepared(other)
+    store = open_store(other, FakeEncoder.model_id, hub)
+    store.add([101], np.full((1, 4), 7.0))  # a second copy of 101, in a later shard name
+    first = run_score(workdir, FakeEncoder(), hub)
+    again = run_score(other, FakeEncoder(), hub)
+    assert again["photo_id"].to_pylist() == first["photo_id"].to_pylist()
+    assert sorted(again["score_contrast"].to_pylist()) == sorted(
+        first["score_contrast"].to_pylist()
+    )
+    assert json.loads((other / EMBEDDINGS).read_text()) == {"embedding_dim": 4, "embedding_rows": 3}
+    assert not list((other / HUB_DIR).rglob(".stream/**/*.parquet"))

@@ -5,7 +5,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
-from huggingface_hub import HfApi
+import pyarrow.parquet as pq
+from huggingface_hub import HfApi, HfFileSystem
 from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 REPO_ID = "NoeFlandre/inat-landscape-filtering"
@@ -17,6 +18,7 @@ class Hub(Protocol):
 
     def list_files(self, prefix: str) -> list[str]: ...
     def download(self, path: str, root: Path) -> Path: ...
+    def read_ids(self, path: str) -> list[int]: ...
     def upload_file(self, local: Path, path: str, message: str) -> None: ...
     def upload_folder(
         self, root: Path, message: str, allow: Sequence[str], delete: Sequence[str]
@@ -46,6 +48,14 @@ class HfHub:
         return Path(
             self.api.hf_hub_download(self.repo_id, path, repo_type="dataset", local_dir=root)
         )
+
+    def read_ids(self, path: str) -> list[int]:
+        """Read only the `photo_id` column of a remote Parquet file (HTTP range requests)."""
+        fs = HfFileSystem()  # the token comes from HF_TOKEN, like HfApi
+        table = pq.read_table(
+            f"datasets/{self.repo_id}/{path}", columns=["photo_id"], filesystem=fs
+        )
+        return table["photo_id"].to_pylist()
 
     def upload_file(self, local: Path, path: str, message: str) -> None:
         self._ensure_repo()
@@ -96,6 +106,9 @@ class OfflineHub:
 
     def download(self, path: str, root: Path) -> Path:
         raise FileNotFoundError(f"offline: cannot download {path} into {root}")
+
+    def read_ids(self, path: str) -> list[int]:
+        raise FileNotFoundError(f"offline: cannot read {path}")
 
     def upload_file(self, local: Path, path: str, message: str) -> None:
         pass
