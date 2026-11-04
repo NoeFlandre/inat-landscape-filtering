@@ -34,15 +34,7 @@ if grep -v -- "-of-$count\$" "$tmp/busy" | grep -q .; then
     echo "chains of another worker count are queued or running: wait, or delete them" >&2
     exit 1
 fi
-free_slots="$(python3 -c '
-import sys
-busy = set()
-for line in open(sys.argv[2]):  # 3-of-9 or 3-6-of-9 (slots 3 to 5)
-    if line.strip():
-        span = line.strip().lstrip("-").rsplit("-of-", 1)[0].split("-")
-        busy.update(range(int(span[0]), int(span[-1]) + (len(span) == 1)))
-print(",".join(str(i) for i in range(int(sys.argv[1])) if i not in busy))
-' "$count" "$tmp/busy")"
+free_slots="$(python3 "$here/free_gpus.py" free "$count" "$tmp/busy")"
 python3 "$here/free_gpus.py" assign "$count" "$free_slots" "$tmp"/*.jsonl > "$tmp/plan.jsonl"
 echo "free slots: $(tr ',' '\n' <<< "$free_slots" | grep -c . || true), GPUs used: $(wc -l < "$tmp/plan.jsonl")"
 [ -s "$tmp/plan.jsonl" ] || exit 0

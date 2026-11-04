@@ -110,6 +110,16 @@ def plan(found: dict[str, list[dict]], *, count: int, slots: list[int]) -> list[
     ]
 
 
+def free_slots(count: int, busy: list[str]) -> list[int]:
+    """Return the slots of `count` that no busy name holds (3-of-9, or 3-6-of-9: slots 3 to 5)."""
+    held = set()
+    for name in busy:
+        if name.strip():
+            span = name.strip().lstrip("-").rsplit("-of-", 1)[0].split("-")
+            held.update(range(int(span[0]), int(span[-1]) + (len(span) == 1)))
+    return [i for i in range(count) if i not in held]
+
+
 def _oar_cores() -> list[dict]:
     command = ["oarnodes", "-J", "--sql", "gpu_count > 0"]
     data = json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout)
@@ -123,19 +133,35 @@ def _read(paths: list[str]) -> dict[str, list[dict]]:
     }
 
 
+def _slots(text: str) -> list[int]:
+    return [int(s) for s in text.split(",") if s]
+
+
+def _free(argv: list[str]) -> list[str]:
+    free = free_slots(int(argv[0]), Path(argv[1]).read_text().splitlines())
+    return [",".join(str(i) for i in free)]
+
+
+def _seats(argv: list[str]) -> list[dict]:
+    return [{"site": s, "options": o, "weight": w} for s, o, w in seats(_read(argv))]
+
+
+def _assign(argv: list[str]) -> list[dict]:
+    return assign(seats(_read(argv[2:])), count=int(argv[0]), free=_slots(argv[1]))
+
+
+def _plan(argv: list[str]) -> list[dict]:
+    return plan(_read(argv[2:]), count=int(argv[0]), slots=_slots(argv[1]))
+
+
+_COMMANDS = {"free": _free, "seats": _seats, "assign": _assign, "plan": _plan}
+
+
 def main(argv: list[str]) -> None:
-    if argv[:1] == ["seats"]:
-        lines = [{"site": s, "options": o, "weight": w} for s, o, w in seats(_read(argv[1:]))]
-    elif argv[:1] == ["assign"]:
-        count, free = int(argv[1]), [int(s) for s in argv[2].split(",") if s]
-        lines = assign(seats(_read(argv[3:])), count=count, free=free)
-    elif argv[:1] == ["plan"]:
-        count, slots = int(argv[1]), [int(s) for s in argv[2].split(",") if s]
-        lines = plan(_read(argv[3:]), count=count, slots=slots)
-    else:
-        lines = clusters(_oar_cores())
+    command = _COMMANDS.get(argv[0]) if argv else None
+    lines = command(argv[1:]) if command else clusters(_oar_cores())
     for line in lines:
-        print(json.dumps(line))
+        print(line if isinstance(line, str) else json.dumps(line))
 
 
 if __name__ == "__main__":

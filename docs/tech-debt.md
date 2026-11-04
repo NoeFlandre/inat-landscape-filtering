@@ -24,10 +24,11 @@ Each item tells why it exists and how to remove it.
 - **Why:** a background thread downloads and decodes the next photos while the model runs, and a thread pool resizes them. This keeps one GPU busy.
 - **Cleanup:** if the CPU of a GPU node becomes the limit, decode the JPEG files on the GPU.
 
-## `done_ids` reads every shard
+## The done-ids snapshot is made by hand
 
-- **Why:** this is simple and correct for thousands of shards.
-- **Cleanup:** keep an index file of done ids, or a shard manifest.
+- **Why:** `embed --snapshot` writes one index file of the done ids (`index/done-ids.parquet`). A job reads the snapshot and only the shards that came after it. This keeps the Hugging Face reads low. A job that runs `--snapshot` must be started by hand (or by a loop on the frontend), for example once each hour.
+- **Effect:** if nobody makes a new snapshot, each job reads more shards, and Hugging Face can refuse the reads (HTTP 429).
+- **Cleanup:** let the last job of each hour write the snapshot.
 
 ## The thresholds have no label-based check
 

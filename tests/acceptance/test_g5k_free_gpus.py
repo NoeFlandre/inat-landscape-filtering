@@ -179,3 +179,20 @@ def test_assign_never_joins_slots_that_are_not_next_to_each_other():
     seats = [("lille", [], 4), ("nancy", [], 4)]
     got = free_gpus.assign(seats, count=10, free=[1, 2, 5, 6, 7])
     assert [s["slots"] for s in got] == ["1:3/10", "5:8/10"]
+
+
+def test_free_slots_leaves_out_busy_slots_and_runs_of_slots():
+    busy = ["3-of-10", "5-8-of-10", "-9-of-10", ""]
+    assert free_gpus.free_slots(10, busy) == [0, 1, 2, 4, 8]
+
+
+def test_free_slots_with_no_busy_slot_is_every_slot():
+    assert free_gpus.free_slots(3, []) == [0, 1, 2]
+
+
+def test_free_command_reads_the_busy_file_and_prints_the_free_slots(tmp_path):
+    busy = tmp_path / "busy"
+    busy.write_text("0-2-of-4\n3-of-4\n")
+    command = [sys.executable, str(SCRIPT), "free", "5", str(busy)]
+    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout  # noqa: S603
+    assert out == "2,4\n"
