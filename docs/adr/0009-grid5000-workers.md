@@ -47,3 +47,6 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - Result: 74,214,068 of the 74,215,277 sample photos have an embedding. The retry pass tried the 1,196 failed downloads again, without success; with 13 photos skipped earlier, 1,209 photos have no embedding.
 - A photo can be in two observations. When two slots embedded the same photo, it has two rows in the `embeddings` config (15,837 photos). `score` keeps the first copy, and the card gives the count.
 - The final `score` and `publish` (without images) took about 2.5 hours on one CPU node. The default-queue CPU nodes of Grenoble were busy for hours, so the job ran in the production queue of Nancy, with a walltime of 4 hours.
+- A second `publish` stopped on a node with 96 GB of memory: the system stopped the process (exit 137) after `score`. A node with 192 GB is necessary (`memnode>=190000`).
+- With 8 parallel shard reads and the score cache (ADR 0012), `score` took 32 minutes in place of about 2 hours, and the total job took about 1 hour on a Rennes production node.
+- After the run, `~/.hf_token` was deleted on all nine sites. The private state repository stays.
