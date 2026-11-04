@@ -188,3 +188,37 @@ def test_a_finished_run_says_it_is_complete_with_its_failed_downloads():
         f"The run is complete: {info.candidates - 2:,} of the {info.candidates:,} sample " in card
     )
     assert "photos have an embedding (2 downloads failed)." in card
+
+
+def test_a_card_without_images_documents_no_image_column():
+    card = render_card(replace(_info(), with_images=False))
+    assert "| `image` |" not in card
+    assert "keep the URL of their image](assets/hero.png)" in card
+
+
+def test_a_card_with_images_documents_the_image_column():
+    card = render_card(_info())
+    assert "| `image` | image | The 500 px photo (threshold configs only) |" in card
+    assert "keep their image](assets/hero.png)" in card
+
+
+def test_fields_without_images_have_no_image_column():
+    assert "image" not in {n for f in fields(3, with_images=False) for n in f.names}
+    assert "image" in {n for f in fields(3) for n in f.names}
+
+
+def test_card_counts_the_photos_with_two_embedding_rows():
+    card = render_card(replace(_info(), embedding_rows=12, embedding_photos=10))
+    assert "| `embeddings` | 12 |" in card
+    assert (
+        "one row per photo, but 2 photos have two rows "
+        "(a photo of two observations, embedded twice; keep one): `photo_id`"
+    ) in card
+    one = render_card(replace(_info(), embedding_rows=12, embedding_photos=11))
+    assert "but 1 photos have two rows" in one
+
+
+def test_card_without_copies_has_one_embedding_row_per_photo():
+    card = render_card(replace(_info(), embedding_rows=12, embedding_photos=12))
+    assert "The `embeddings` config has one row per photo:" in card
+    assert "two rows" not in card

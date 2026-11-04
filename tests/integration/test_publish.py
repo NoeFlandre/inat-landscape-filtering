@@ -141,6 +141,14 @@ def test_card_documents_exactly_the_published_columns(scored):
     assert columns == documented
 
 
+def test_card_without_images_documents_exactly_the_published_columns(scored):
+    workdir, hub, _, _ = scored
+    report = _publish(workdir, hub, (0.0,), images=False)
+    columns = set(_remote(hub, report.subsets[0].config).column_names)
+    documented = {n for f in fields(len(LANDSCAPE_PROMPTS), with_images=False) for n in f.names}
+    assert columns == documented
+
+
 def test_stale_threshold_configs_are_removed(scored):
     workdir, hub, _, _ = scored
     _publish(workdir, hub, (0.0,))

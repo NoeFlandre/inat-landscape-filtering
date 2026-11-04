@@ -70,9 +70,10 @@ class CardInfo:
     h3_res: int
     with_images: bool = True  # False: the threshold configs give the image URLs only
     layer_cap: int | None = None  # complete layers of the uniform order (ADR 0011), if any
+    embedding_photos: int | None = None  # None: one row per photo
 
 
-def fields(n_prompts: int) -> tuple[Field, ...]:
+def fields(n_prompts: int, *, with_images: bool = True) -> tuple[Field, ...]:
     """Return the documented columns of the data configs."""
     per_prompt = tuple(f"score_landscape_{i}" for i in range(1, n_prompts + 1))
     return (
@@ -106,7 +107,10 @@ def fields(n_prompts: int) -> tuple[Field, ...]:
         Field(("h3_cell",), "int", "[H3](https://h3geo.org) cell of the location"),
         Field(("sample_rank",), "int", "Position of the photo in the uniform sample order"),
         Field(("cell_rank",), "int", "Place of the photo in the sample order of its H3 cell"),
-        Field(("image",), "image", "The 500 px photo (threshold configs only)"),
+    ) + (
+        (Field(("image",), "image", "The 500 px photo (threshold configs only)"),)
+        if with_images
+        else ()
     )
 
 
@@ -189,7 +193,7 @@ def _intro(info: CardInfo) -> str:
     return f"""
 ![iNaturalist Landscape Filtering: a deterministic sample of iNaturalist photos of all taxa \
 is scored for landscape content by SigLIP2; photos above each \
-threshold keep their image](assets/hero.png)
+threshold keep {"their image" if info.with_images else "the URL of their image"}](assets/hero.png)
 
 # iNaturalist Landscape Filtering
 
@@ -311,7 +315,7 @@ def _breakdown_rows(items: tuple[Breakdown, ...]) -> str:
 def _fields(info: CardInfo) -> str:
     rows = "\n".join(
         f"| {', '.join(f'`{n}`' for n in f.names)} | {f.type} | {f.description} |"
-        for f in fields(len(info.landscape_prompts))
+        for f in fields(len(info.landscape_prompts), with_images=info.with_images)
     )
     return f"""## Fields
 
@@ -319,9 +323,19 @@ def _fields(info: CardInfo) -> str:
 |---|---|---|
 {rows}
 
-The `embeddings` config has one row per photo: `photo_id` and `embedding` (list of \
+{_embedding_rows(info)} `photo_id` and `embedding` (list of \
 {info.embedding_dim} float16). Join it to the other configs on `photo_id`.
 """
+
+
+def _embedding_rows(info: CardInfo) -> str:
+    copies = info.embedding_rows - (info.embedding_photos or info.embedding_rows)
+    if copies <= 0:
+        return "The `embeddings` config has one row per photo:"
+    return (
+        f"The `embeddings` config has one row per photo, but {copies:,} photos have two rows "
+        "(a photo of two observations, embedded twice; keep one):"
+    )
 
 
 def _files(info: CardInfo) -> str:

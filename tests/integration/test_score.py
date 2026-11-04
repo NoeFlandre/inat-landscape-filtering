@@ -78,5 +78,9 @@ def test_score_streams_the_shards_from_a_new_machine_and_keeps_the_first_copy(em
     assert sorted(again["score_contrast"].to_pylist()) == sorted(
         first["score_contrast"].to_pylist()
     )
-    assert json.loads((other / EMBEDDINGS).read_text()) == {"embedding_dim": 4, "embedding_rows": 3}
+    assert json.loads((other / EMBEDDINGS).read_text()) == {
+        "embedding_dim": 4,
+        "embedding_rows": 4,
+        "embedding_photos": 3,
+    }
     assert not list((other / HUB_DIR).rglob(".stream/**/*.parquet"))

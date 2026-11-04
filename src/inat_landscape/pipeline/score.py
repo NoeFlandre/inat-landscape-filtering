@@ -37,10 +37,11 @@ def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
     sample_ids = read_sample(workdir, columns=["photo_id"])["photo_id"].to_numpy()
     store = open_store(workdir, encoder.model_id, hub)
     directions = _directions(encoder)
-    ids, scores, dim = _score_shards(store, directions, encoder)
+    ids, scores, dim, rows = _score_shards(store, directions, encoder)
     if not len(ids):
         raise StageError("no embeddings: run `embed` first")
-    write_json({"embedding_rows": len(ids), "embedding_dim": dim}, workdir / EMBEDDINGS)
+    counts = {"embedding_rows": rows, "embedding_photos": len(ids), "embedding_dim": dim}
+    write_json(counts, workdir / EMBEDDINGS)
     keep = np.isin(ids, sample_ids)
     ids, scores = ids[keep], {name: column[keep] for name, column in scores.items()}
     table = read_rows(workdir / SAMPLE, "photo_id", ids.tolist())
@@ -54,8 +55,9 @@ def run_score(workdir: Path, encoder: Encoder, hub: Hub) -> pa.Table:
 
 def _score_shards(
     store: EmbeddingStore, directions: dict[str, tuple[str, np.ndarray]], encoder: Encoder
-) -> tuple[np.ndarray, dict[str, np.ndarray], int]:
-    """Score every shard. Return the ids (first copy of each), their scores and the length."""
+) -> tuple[np.ndarray, dict[str, np.ndarray], int, int]:
+    """Score every shard. Return the ids (first copy of each), their scores, the length of the
+    embeddings and the count of rows (a photo of two observations can have two rows)."""
     ids: list[np.ndarray] = []
     parts: list[dict[str, np.ndarray]] = []
     dim = 0
@@ -66,7 +68,7 @@ def _score_shards(
             _score_columns(embeddings[i : i + SCORE_ROWS], directions, encoder)
             for i in range(0, len(shard_ids), SCORE_ROWS)
         )
-    return (*_first_copies(ids, parts), dim)
+    return (*_first_copies(ids, parts), dim, sum(len(i) for i in ids))
 
 
 def _first_copies(

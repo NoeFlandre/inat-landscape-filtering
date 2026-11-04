@@ -221,6 +221,7 @@ def _card_info(
         embedding_dir=embedding_dir(model_id),
         embedding_dim=embeddings.get("embedding_dim", 0),
         embedding_rows=embeddings.get("embedding_rows", 0),
+        embedding_photos=embeddings.get("embedding_photos", embeddings.get("embedding_rows", 0)),
         no_location=table["latitude"].null_count,
         score=spec.score,
         cap_per_cell=spec.cap_per_cell,
@@ -256,7 +257,7 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
     def xy(t: pa.Table) -> tuple[list[float], list[float]]:
         return t["longitude"].to_pylist(), t["latitude"].to_pylist()
 
-    figures.pipeline(folder / "hero.png")
+    figures.pipeline(folder / "hero.png", with_images=spec.images)
     figures.world_map(
         folder / "map.png",
         xy(pool),

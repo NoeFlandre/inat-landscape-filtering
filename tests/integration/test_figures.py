@@ -61,3 +61,14 @@ def test_examples_mosaic_is_a_small_jpeg_with_one_row_per_band(tmp_path):
         assert image.format == "JPEG"
         assert image.height > image.width / 3  # three rows of square tiles
     assert path.stat().st_size < 300_000
+
+
+def test_pipeline_figure_names_all_taxa_and_the_threshold_content():
+    assert figures.collect_steps() == ("Metadata stream", "UUID sample", "All taxa")
+    assert figures.dataset_rows(with_images=True)[1] == "score ≥ t · + 500 px image"
+    assert figures.dataset_rows(with_images=False)[1] == "score ≥ t · + 500 px URL"
+
+
+def test_pipeline_figure_without_images(tmp_path):
+    figures.pipeline(tmp_path / "hero.png", with_images=False)
+    assert (tmp_path / "hero.png").read_bytes()[:8] == PNG

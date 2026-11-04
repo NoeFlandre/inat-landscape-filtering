@@ -39,3 +39,11 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - Result: 9 slots on the free GPUs of three Grenoble clusters (vercors9, vercors10 and vercors16; slot 8 waited for a busy Rennes GPU and moved to a Grenoble L4) embedded the last 1,004,353 photos in about 1 hour, at about 200 photos per second on each L4. 4 slots ran as besteffort jobs. The retry pass tried the 10 failed downloads again, without success. The final dataset has 1,817,780 embedded photos of 1,817,793 (13 failed downloads).
 - `scripts/g5k/publish.oar` runs `score` and `publish` on a CPU node: every 20 minutes without images during the run, and once with the images at the end.
 - The final publish with images takes more than 1 hour. The production queue refused a walltime extension and stopped the first try at 1 hour. Thus the final publish runs in the default queue, with 1-hour extensions in the last 10 minutes of the job.
+
+## All-taxa run (2026-11-03 to 2026-11-04)
+
+- The sample of all taxa, with a cap of 1,000 photos per H3 cell, has 74,215,277 photos. The run used 135 weighted slots (`I:J/N`, ADR 0011) on the free GPUs of four sites (Grenoble, Nancy, Rennes, Sophia). A fast GPU owns a run of more slots, so all slots advance at about one speed.
+- A done-ids snapshot (`embed --snapshot`, one index file each hour) keeps the Hugging Face reads low. Before the snapshot, many jobs read all shards at the same time and Hugging Face refused the reads (HTTP 429). The shard pushes of a job go in one commit each 30 minutes, below the limit of 128 commits each hour for a repository.
+- Result: 74,214,068 of the 74,215,277 sample photos have an embedding. The retry pass tried the 1,196 failed downloads again, without success; with 13 photos skipped earlier, 1,209 photos have no embedding.
+- A photo can be in two observations. When two slots embedded the same photo, it has two rows in the `embeddings` config (15,837 photos). `score` keeps the first copy, and the card gives the count.
+- The final `score` and `publish` (without images) took about 2.5 hours on one CPU node. The default-queue CPU nodes of Grenoble were busy for hours, so the job ran in the production queue of Nancy, with a walltime of 4 hours.

@@ -42,7 +42,18 @@ mpl.rcParams.update(
 )
 
 
-def pipeline(path: Path) -> None:
+def collect_steps() -> tuple[str, ...]:
+    """Return the steps of the Collect panel of the pipeline diagram."""
+    return ("Metadata stream", "UUID sample", "All taxa")
+
+
+def dataset_rows(*, with_images: bool) -> tuple[str, ...]:
+    """Return the configs of the Dataset panel of the pipeline diagram."""
+    content = "500 px image" if with_images else "500 px URL"
+    return ("all · metadata + scores", f"score ≥ t · + {content}", "embeddings · 768-d")
+
+
+def pipeline(path: Path, *, with_images: bool = True) -> None:
     """Draw the pipeline diagram: collect, score, dataset."""
     fig, ax = plt.subplots(figsize=(16, 6.4))
     ax.set(xlim=(0, 160), ylim=(0, 64))
@@ -51,7 +62,7 @@ def pipeline(path: Path) -> None:
         ax.text(x, 60, title, fontsize=20, fontweight="bold", color=INK, va="center")
     _collect(ax)
     _score(ax)
-    _dataset(ax)
+    _dataset(ax, with_images=with_images)
     for x0, x1 in ((48, 57), (102, 111)):
         ax.annotate(
             "", (x1, 31), (x0, 31), arrowprops={"arrowstyle": "-|>", "color": LINE, "lw": 1.4}
@@ -81,7 +92,7 @@ def _collect(ax: plt.Axes) -> None:
     ax.plot([25, 25], [centers[-1], centers[0]], color=LINE, lw=1.2)
     for y, label, tone in zip(
         centers,
-        ("Metadata stream", "UUID sample", "Plants + no ID"),
+        collect_steps(),
         ("purple", "blue", "green"),
         strict=True,
     ):
@@ -116,13 +127,9 @@ def _score(ax: plt.Axes) -> None:
     ax.text(90, 10, "CLOSE-UP", ha="center", fontsize=12, fontweight="bold", color="#9a5b4e")
 
 
-def _dataset(ax: plt.Axes) -> None:
+def _dataset(ax: plt.Axes, *, with_images: bool) -> None:
     _panel(ax, (112, 4, 44, 50), "dataset")
-    rows = (
-        ("all · metadata + scores", "blue"),
-        ("score ≥ t · + 500 px image", "green"),
-        ("embeddings · 768-d", "purple"),
-    )
+    rows = zip(dataset_rows(with_images=with_images), ("blue", "green", "purple"), strict=True)
     for i, (label, tone) in enumerate(rows):
         _chip(ax, (117, 41 - i * 12, 34, 8), label, tone)
     for k, (dx, dy) in enumerate(((0, 0), (5, 3), (9, -1))):
