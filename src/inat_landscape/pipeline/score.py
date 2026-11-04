@@ -22,6 +22,7 @@ from inat_landscape.domain.scoring import (
 )
 from inat_landscape.pipeline.embed import open_store, read_sample
 from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.land import land_only
 from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.sample import SAMPLE
 
@@ -52,7 +53,8 @@ def run_score(
     write_json(counts, workdir / EMBEDDINGS)
     keep = in_sorted(ids, np.sort(sample_ids))
     ids, scores = ids[keep], {name: column[keep] for name, column in scores.items()}
-    table = read_rows(workdir / SAMPLE, "photo_id", ids.tolist())
+    # a photo of two observations has two sample rows: one can be in a cell at sea
+    table = land_only(workdir, read_rows(workdir / SAMPLE, "photo_id", ids.tolist()))
     sorter = np.argsort(ids)
     where = sorter[np.searchsorted(ids[sorter], table["photo_id"].to_numpy())]
     for name, column in scores.items():

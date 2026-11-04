@@ -36,7 +36,7 @@ from inat_landscape.pipeline.embed import (
 )
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES, MANIFEST
-from inat_landscape.pipeline.land import LAND_REPORT, on_land
+from inat_landscape.pipeline.land import LAND_REPORT, land_only
 from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
@@ -253,9 +253,9 @@ def _years(table: pa.Table) -> tuple[str, str]:
 
 
 def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) -> None:
-    pool = read_table(workdir / CANDIDATES, ["longitude", "latitude", "h3_cell"])
-    keep = on_land(workdir, pool["h3_cell"].to_numpy())
-    pool = pool if keep is None else pool.filter(pa.array(keep))
+    pool = land_only(
+        workdir, read_table(workdir / CANDIDATES, ["longitude", "latitude", "h3_cell"])
+    )
     params = _params(workdir)
     per_cell = table.group_by("h3_cell").aggregate(
         [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]

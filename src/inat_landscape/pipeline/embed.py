@@ -22,7 +22,7 @@ from inat_landscape.adapters.images import Fetched, decode, fetch
 from inat_landscape.adapters.inat_dump import PHOTO_URL
 from inat_landscape.domain.sampling import Slots, in_slots
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.land import LAND, on_land
+from inat_landscape.pipeline.land import LAND, land_only
 from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
 from inat_landscape.pipeline.score_cache import carry_scores
@@ -92,21 +92,15 @@ def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
     if not (workdir / SAMPLE).exists():
         raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
     if columns is None:
-        return _on_land(workdir, read_table(workdir / SAMPLE))
+        return land_only(workdir, read_table(workdir / SAMPLE))
     table = read_table(workdir / SAMPLE, list(dict.fromkeys([*columns, "h3_cell"])))
-    return _on_land(workdir, table).select(columns)
+    return land_only(workdir, table).select(columns)
 
 
 def _slim_is_enough(workdir: Path, columns: list[str] | None) -> bool:
     """Tell if `sample-ids.parquet` has the columns, and no land filter applies."""
     ids_only = bool(columns) and set(columns or ()) <= {"photo_id", "extension"}
     return ids_only and (workdir / SAMPLE_IDS).exists() and not (workdir / LAND).exists()
-
-
-def _on_land(workdir: Path, table: pa.Table) -> pa.Table:
-    """Leave out the photos of the cells at sea, if the land stage ran."""
-    keep = on_land(workdir, table["h3_cell"].to_numpy())
-    return table if keep is None else table.filter(pa.array(keep))
 
 
 @dataclass(frozen=True)

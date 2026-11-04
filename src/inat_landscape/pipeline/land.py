@@ -50,3 +50,9 @@ def on_land(workdir: Path, cells: np.ndarray) -> np.ndarray | None:
         return None
     land = np.sort(read_table(workdir / LAND)["h3_cell"].to_numpy())
     return in_sorted(np.asarray(cells, land.dtype), land)
+
+
+def land_only(workdir: Path, table: pa.Table) -> pa.Table:
+    """Leave out the rows of the cells at sea, if the land stage ran."""
+    keep = on_land(workdir, table["h3_cell"].to_numpy())
+    return table if keep is None else table.filter(pa.array(keep))
