@@ -50,3 +50,4 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - A second `publish` stopped on a node with 96 GB of memory: the system stopped the process (exit 137) after `score`. A node with 192 GB is necessary (`memnode>=190000`).
 - With 8 parallel shard reads and the score cache (ADR 0012), `score` took 32 minutes in place of about 2 hours, and the total job took about 1 hour on a Rennes production node.
 - After the run, `~/.hf_token` was deleted on all nine sites. The private state repository stays.
+- After the land filter and the diversity maps (ADR 0013, ADR 0014), all the data on the nine sites was deleted (only `~/.ssh` and the shell profiles stay), with the second token.

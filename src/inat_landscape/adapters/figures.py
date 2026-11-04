@@ -237,7 +237,7 @@ def look_map(path: Path, lon: np.ndarray, lat: np.ndarray, rgb: np.ndarray) -> N
         0.5,
         -0.02,
         "What the photos show: the 3 first principal components of the mean embedding of each "
-        "H3 cell (resolution 5) as red, green and blue, mean per 2° hexagon (similar colours: "
+        "H3 cell (resolution 5)\nas red, green and blue, mean per 2° hexagon (similar colours: "
         "similar photos)",
         transform=ax.transAxes,
         ha="center",
