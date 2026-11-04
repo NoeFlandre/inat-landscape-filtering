@@ -21,6 +21,8 @@ def unit(vectors: Floats) -> NDArray[np.float32]:
 
 def group_sums(groups: Ints, vectors: Floats) -> tuple[Ints, Floats, Ints]:
     """Return each group that has rows, the sum of its vectors (float64) and its row count."""
+    if not len(groups):
+        return groups, np.zeros((0, *np.shape(vectors)[1:])), np.zeros(0, np.int64)
     order = np.argsort(groups)
     sorted_groups = groups[order]
     starts = np.flatnonzero(np.r_[True, sorted_groups[1:] != sorted_groups[:-1]])

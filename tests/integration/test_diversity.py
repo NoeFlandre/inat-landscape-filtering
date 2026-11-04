@@ -23,6 +23,7 @@ def embedded(tmp_path):
     store = open_store(tmp_path, FakeEncoder.model_id, hub)
     store.add([101, 103], np.array([VECTORS[101], VECTORS[103]]))
     store.add([102, 107], np.array([VECTORS[102], VECTORS[107]]))
+    store.add([999], np.array([[1.0, 1.0, 1.0]]))  # a shard with no chosen photo
     return tmp_path, hub
 
 

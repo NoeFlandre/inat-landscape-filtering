@@ -30,6 +30,12 @@ def test_group_sums_add_the_rows_of_each_group():
     assert counts.tolist() == [1, 2, 1]
 
 
+def test_group_sums_of_no_row():
+    groups, sums, counts = group_sums(np.zeros(0, np.int64), np.zeros((0, 3), np.float32))
+    assert (len(groups), sums.shape, len(counts)) == (0, (0, 3), 0)
+    assert (sums.dtype, counts.dtype) == (np.float64, np.int64)
+
+
 def test_same_vectors_have_no_diversity_and_opposite_ones_the_most():
     same = unit(np.array([[1.0, 1.0]] * 3)).sum(axis=0, dtype=np.float64)
     opposite = np.array([[1.0, 0.0], [-1.0, 0.0]]).sum(axis=0)
