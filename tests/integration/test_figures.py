@@ -66,6 +66,7 @@ def test_examples_mosaic_is_a_small_jpeg_with_one_row_per_band(tmp_path):
 
 def test_pipeline_figure_names_all_taxa_and_the_threshold_content():
     assert figures.collect_steps() == ("Metadata stream", "UUID sample", "All taxa")
+    assert figures.collect_steps(land=True)[-1] == "On land"
     assert figures.dataset_rows(with_images=True)[1] == "score ≥ t · + 500 px image"
     assert figures.dataset_rows(with_images=False)[1] == "score ≥ t · + 500 px URL"
 
@@ -103,3 +104,19 @@ def test_diversity_map_of_one_value(tmp_path):
     cells = (np.array([0.0]), np.array([0.0]), np.array([0.4]))
     figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5)
     assert (tmp_path / "d.png").read_bytes()[:8] == PNG
+
+
+def test_chip_text_fits_its_box(tmp_path):
+    fig, ax = figures.plt.subplots(figsize=(16, 6.4))
+    ax.set(xlim=(0, 160), ylim=(0, 64))
+    figures._chip(ax, (0, 0, 14, 5), "Metadata stream", "blue")
+    text = ax.texts[0]
+    box = text.get_window_extent().transformed(ax.transData.inverted())
+    assert box.width <= 12
+    assert float(text.get_fontsize()) < 12
+    figures.plt.close(fig)
+
+
+def test_pipeline_figure_with_the_land_step(tmp_path):
+    figures.pipeline(tmp_path / "hero.png", with_images=False, land=True)
+    assert (tmp_path / "hero.png").read_bytes()[:8] == PNG

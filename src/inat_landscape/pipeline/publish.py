@@ -39,7 +39,7 @@ from inat_landscape.pipeline.embed import (
 )
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import CANDIDATES, MANIFEST
-from inat_landscape.pipeline.land import LAND_REPORT, land_only
+from inat_landscape.pipeline.land import LAND, LAND_REPORT, land_only
 from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
@@ -282,7 +282,7 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
     def xy(t: pa.Table) -> tuple[list[float], list[float]]:
         return t["longitude"].to_pylist(), t["latitude"].to_pylist()
 
-    figures.pipeline(folder / "hero.png", with_images=spec.images)
+    figures.pipeline(folder / "hero.png", with_images=spec.images, land=(workdir / LAND).exists())
     figures.world_map(
         folder / "map.png",
         xy(pool),

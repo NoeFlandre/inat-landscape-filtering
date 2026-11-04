@@ -43,9 +43,9 @@ mpl.rcParams.update(
 )
 
 
-def collect_steps() -> tuple[str, ...]:
+def collect_steps(*, land: bool = False) -> tuple[str, ...]:
     """Return the steps of the Collect panel of the pipeline diagram."""
-    return ("Metadata stream", "UUID sample", "All taxa")
+    return ("Metadata stream", "UUID sample", "All taxa", *(("On land",) if land else ()))
 
 
 def dataset_rows(*, with_images: bool) -> tuple[str, ...]:
@@ -54,14 +54,14 @@ def dataset_rows(*, with_images: bool) -> tuple[str, ...]:
     return ("all · metadata + scores", f"score ≥ t · + {content}", "embeddings · 768-d")
 
 
-def pipeline(path: Path, *, with_images: bool = True) -> None:
+def pipeline(path: Path, *, with_images: bool = True, land: bool = False) -> None:
     """Draw the pipeline diagram: collect, score, dataset."""
     fig, ax = plt.subplots(figsize=(16, 6.4))
     ax.set(xlim=(0, 160), ylim=(0, 64))
     ax.axis("off")
     for x, title in ((4, "Collect"), (58, "Score"), (112, "Dataset")):
         ax.text(x, 60, title, fontsize=20, fontweight="bold", color=INK, va="center")
-    _collect(ax)
+    _collect(ax, land=land)
     _score(ax)
     _dataset(ax, with_images=with_images)
     for x0, x1 in ((48, 57), (102, 111)):
@@ -71,7 +71,7 @@ def pipeline(path: Path, *, with_images: bool = True) -> None:
     _save(fig, path)
 
 
-def _collect(ax: plt.Axes) -> None:
+def _collect(ax: plt.Axes, *, land: bool) -> None:
     _panel(ax, (4, 4, 44, 50), "collect")
     ax.add_patch(Rectangle((7, 28), 15, 15, color="#e5e9ec"))
     ax.add_patch(Rectangle((9, 31), 11, 9, fill=False, ec="#2f6b70", lw=2))
@@ -88,16 +88,13 @@ def _collect(ax: plt.Axes) -> None:
         color=INK,
         linespacing=1.3,
     )
-    centers = (44, 33, 22)
+    steps = collect_steps(land=land)
+    gap = 33 / len(steps)  # the chips fill the panel from y = 49 down to y = 16
+    centers = [49 - gap * (i + 0.5) for i in range(len(steps))]
     ax.plot([22, 25], [35.5, 35.5], color=LINE, lw=1.2)
     ax.plot([25, 25], [centers[-1], centers[0]], color=LINE, lw=1.2)
-    for y, label, tone in zip(
-        centers,
-        collect_steps(),
-        ("purple", "blue", "green"),
-        strict=True,
-    ):
-        _chip(ax, (27.5, y - 3.5, 19, 7), label, tone)
+    for y, label, tone in zip(centers, steps, ("purple", "blue", "green", "sand"), strict=False):
+        _chip(ax, (27.5, y - gap * 0.4, 19, gap * 0.8), label, tone)
         ax.annotate(
             "", (27.5, y), (25, y), arrowprops={"arrowstyle": "-|>", "color": LINE, "lw": 1.2}
         )
@@ -148,6 +145,8 @@ _MAX_LINEAR_BINS = 12
 _EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
 _MAP_SIZE = (16, 8.6)
 _LOOK_STEP = 0.5  # degrees
+_CHIP_FONT = 12
+_MIN_FONT = 6  # a chip label does not get smaller than this
 Box = tuple[float, float, float, float]  # x, y, width, height
 
 
@@ -169,17 +168,30 @@ def _chip(ax: plt.Axes, box: Box, label: str, tone: str) -> None:
             (x, y), w, h, boxstyle="round,pad=0,rounding_size=0.8", fc=face, ec=edge, lw=1.2
         )
     )
-    ax.text(
+    text = ax.text(
         x + w / 2,
         y + h / 2,
         label,
         ha="center",
         va="center",
-        fontsize=12,
+        fontsize=_CHIP_FONT,
         fontweight="bold",
         color=INK,
         linespacing=1.3,
     )
+    _fit(ax, text, w - 2, h - 1)
+
+
+def _fit(ax: plt.Axes, text: plt.Text, width: float, height: float) -> None:
+    """Make the font smaller until the text fits in width x height (data units)."""
+    size = float(_CHIP_FONT)
+    inverse = ax.transData.inverted()
+    while size > _MIN_FONT:
+        box = text.get_window_extent().transformed(inverse)
+        if box.width <= width and box.height <= height:
+            return
+        size -= 0.5
+        text.set_fontsize(size)
 
 
 def world_map(path: Path, pool: Points, cells: CellCounts, *, cap: int, res: int) -> None:
