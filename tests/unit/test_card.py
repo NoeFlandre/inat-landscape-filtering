@@ -241,3 +241,31 @@ def test_card_without_the_land_stage_says_nothing_of_the_sea():
     text = render_card(_info())
     assert "at sea" not in text
     assert "Coasts" not in text
+
+
+def test_card_explains_the_three_maps():
+    text = render_card(replace(_info(), diversity_per_cell=50, diversity_min_photos=20))
+    assert "](assets/map.png)\n\n**Map 1, photos per cell.** For each H3 cell (resolution" in text
+    assert (
+        "\n\n![Visual diversity of each H3 cell](assets/diversity.png)\n\n**Map 2, visual "
+        "diversity.** For each H3 cell, 50 random photos of the cell, and the mean cosine "
+        "distance between their SigLIP2 embeddings: 0 when the photos look the same, higher when "
+        "they show more varied scenes. The colour bins have the same count of cells. A cell with "
+        "fewer than 20 photos has no value.\n\n![What the photos of each H3 cell show, as a "
+        "colour](assets/look.png)\n\n**Map 3, what the photos show.** For each H3 cell, the mean "
+        "SigLIP2 embedding of the same 50 photos, projected on the 3 first principal components "
+        "of all the cells, as red, green and blue. Places with similar colours have similar "
+        "photos; a colour has no fixed meaning.\n" in text
+    )
+    info = _info()
+    assert (
+        f"For each H3 cell (resolution {info.h3_res}), the count of published photos, at most "
+        f"{info.embed_cap:,}. A hexagon of the map is 2° wide and gives the mean of its cells. "
+        "Grey: the places of the full sample.\n" in text
+    )
+
+
+def test_card_without_the_diversity_maps_has_one_map():
+    text = render_card(_info())
+    assert "diversity.png" not in text
+    assert "Each map gives" not in text

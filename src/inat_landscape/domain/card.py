@@ -76,6 +76,8 @@ class CardInfo:
     embedding_photos: int | None = None  # None: one row per photo
     sea_photos: int | None = None  # photos of the cells at sea, left out (None: no land filter)
     sea_cells: int = 0
+    diversity_per_cell: int | None = None  # photos per cell of the diversity maps, if drawn
+    diversity_min_photos: int = 20  # a cell with fewer embedded photos has no value
 
 
 def fields(n_prompts: int, *, with_images: bool = True) -> tuple[Field, ...]:
@@ -220,7 +222,7 @@ ground-level photos that show land use and land cover, to pair with remote sensi
 
 ![How full the H3 cells are against the cap of {info.embed_cap} photos, with the full sample \
 in grey](assets/map.png)
-"""
+{_diversity_maps(info)}"""
 
 
 def _quick_start(info: CardInfo) -> str:
@@ -418,6 +420,30 @@ to a random point in a cell of about 0.2°. The source has no flag for this.
 It is where the observer or the organism was, not the area in view.
 * **No validation.** The thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
+"""
+
+
+def _diversity_maps(info: CardInfo) -> str:
+    if info.diversity_per_cell is None:
+        return ""
+    k = info.diversity_per_cell
+    return f"""
+**Map 1, photos per cell.** For each H3 cell (resolution {info.h3_res}), the count of \
+published photos, at most {info.embed_cap:,}. A hexagon of the map is 2° wide and gives the \
+mean of its cells. Grey: the places of the full sample.
+
+![Visual diversity of each H3 cell](assets/diversity.png)
+
+**Map 2, visual diversity.** For each H3 cell, {k} random photos of the cell, and the mean \
+cosine distance between their SigLIP2 embeddings: 0 when the photos look the same, higher \
+when they show more varied scenes. The colour bins have the same count of cells. A cell with \
+fewer than {info.diversity_min_photos} photos has no value.
+
+![What the photos of each H3 cell show, as a colour](assets/look.png)
+
+**Map 3, what the photos show.** For each H3 cell, the mean SigLIP2 embedding of the same \
+{k} photos, projected on the 3 first principal components of all the cells, as red, green \
+and blue. Places with similar colours have similar photos; a colour has no fixed meaning.
 """
 
 

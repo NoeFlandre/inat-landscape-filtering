@@ -11,6 +11,7 @@ from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.images import fetch
 from inat_landscape.domain.card import fields
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
+from inat_landscape.pipeline.diversity import run_diversity
 from inat_landscape.pipeline.embed import HUB_DIR, EmbedOptions, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.land import run_land
@@ -248,3 +249,14 @@ def test_publish_after_the_land_stage_leaves_out_the_cells_at_sea(scored, monkey
     assert "the 2 photos of 2 cells at sea are left out." in card
     assert sorted(_remote(hub, "all")["photo_id"].to_pylist()) == [101, 102]
     assert maps == [([3.25, 3.25], [45.5, 45.5])]
+
+
+def test_publish_draws_the_diversity_maps_after_the_diversity_stage(scored):
+    workdir, hub, _, _ = scored
+    run_diversity(workdir, FakeEncoder.model_id, hub, min_photos=2)
+    _publish(workdir, hub, (0.0,))
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    assert "](assets/diversity.png)" in card
+    assert "50 random photos of the cell" in card
+    for name in ("diversity", "look"):
+        assert (workdir / HUB_DIR / "assets" / f"{name}.png").read_bytes()[:4] == b"\x89PNG"

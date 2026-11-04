@@ -11,10 +11,11 @@ import hashlib
 import json
 import re
 import shutil
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
 import pyarrow as pa
@@ -24,6 +25,8 @@ from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.members import in_sorted
 from inat_landscape.domain.sampling import Slots, in_slots
+
+T = TypeVar("T")
 
 _INDEX = "index"  # the done-ids snapshot; not a shard (the embeddings config reads *.parquet)
 
@@ -118,6 +121,11 @@ class EmbeddingStore:
         """Yield the ids and float16 embeddings of each shard, one shard at a time."""
         for path in self.shards():
             yield self.read(path)
+
+    def each(self, fn: Callable[[str], T], workers: int = 1) -> list[T]:
+        """Return fn(path) for each shard, in order, with `workers` threads."""
+        with ThreadPoolExecutor(workers) as pool:
+            return list(pool.map(fn, self.shards()))
 
     def shards(self) -> list[str]:
         """Return the paths of all the shards, local and remote, each once and in order."""

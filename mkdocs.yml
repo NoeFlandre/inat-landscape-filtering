@@ -20,4 +20,5 @@ nav:
       - adr/0011-uniform-order.md
       - adr/0012-score-cache.md
       - adr/0013-land-only.md
+      - adr/0014-diversity-maps.md
   - Technical debt: tech-debt.md

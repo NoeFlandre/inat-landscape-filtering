@@ -1,5 +1,6 @@
 """Card figures: each function writes a PNG or a JPEG."""
 
+import numpy as np
 from PIL import Image
 
 from inat_landscape.adapters import figures
@@ -72,3 +73,33 @@ def test_pipeline_figure_names_all_taxa_and_the_threshold_content():
 def test_pipeline_figure_without_images(tmp_path):
     figures.pipeline(tmp_path / "hero.png", with_images=False)
     assert (tmp_path / "hero.png").read_bytes()[:8] == PNG
+
+
+def test_diversity_map(tmp_path):
+    cells = (np.array([0.0, 20.0, -40.0]), np.array([0.0, 10.0, 30.0]), np.array([0.2, 0.5, 0.9]))
+    figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5)
+    assert (tmp_path / "d.png").read_bytes()[:8] == PNG
+
+
+def test_look_map(tmp_path):
+    rgb = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    figures.look_map(tmp_path / "l.png", np.array([0.0, 100.0]), np.array([0.0, -30.0]), rgb)
+    assert (tmp_path / "l.png").read_bytes()[:8] == PNG
+
+
+def test_grid_mean_averages_each_square_and_leaves_the_others_transparent():
+    lon = np.array([-179.9, -179.8, 179.9, 0.0])
+    lat = np.array([-59.9, -59.9, 83.9, 90.0])  # the last one is out of the map
+    values = np.array([[1.0, 0, 0], [0.0, 0, 1], [0.0, 1, 0], [1.0, 1, 1]])
+    image = figures.grid_mean(lon, lat, values, 1.0)
+    assert image.shape == (144, 360, 4)
+    assert image[0, 0].tolist() == [0.5, 0.0, 0.5, 1.0]
+    assert image[143, 359].tolist() == [0.0, 1.0, 0.0, 1.0]
+    assert image[:, :, 3].sum() == 2
+    assert image[50, 50].tolist() == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_diversity_map_of_one_value(tmp_path):
+    cells = (np.array([0.0]), np.array([0.0]), np.array([0.4]))
+    figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5)
+    assert (tmp_path / "d.png").read_bytes()[:8] == PNG

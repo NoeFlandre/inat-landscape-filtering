@@ -24,6 +24,7 @@ from inat_landscape.domain.sampling import Slots
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
+from inat_landscape.pipeline.diversity import MIN_PHOTOS, PER_CELL, run_diversity
 from inat_landscape.pipeline.embed import (
     EmbedOptions,
     open_store,
@@ -119,6 +120,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_sample(sub)
     land = sub.add_parser("land", help="keep only the H3 cells that touch land (Natural Earth)")
     land.set_defaults(handler=_land)
+    _add_diversity(sub)
     _add_embed(sub)
     _add_score(sub)
     _add_publish(sub)
@@ -202,6 +204,22 @@ def _hub_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--repo-id", default=REPO_ID, help=f"HF dataset repo (default: {REPO_ID})")
     p.add_argument("--offline", action="store_true", help="do not read or write the HF repo")
     p.add_argument("--model", default=MODEL_ID, help=f"model id (default: {MODEL_ID})")
+
+
+def _add_diversity(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("diversity", help="visual diversity and colour of each H3 cell")
+    _hub_options(p)
+    p.add_argument(
+        "--per-cell", type=int, default=PER_CELL, help=f"photos of each cell (default: {PER_CELL})"
+    )
+    p.add_argument(
+        "--min-photos",
+        type=int,
+        default=MIN_PHOTOS,
+        help=f"embedded photos a cell needs to have a value (default: {MIN_PHOTOS})",
+    )
+    p.add_argument("--workers", type=int, default=8, help="shards read at the same time")
+    p.set_defaults(handler=_diversity)
 
 
 def _add_embed(sub: argparse._SubParsersAction) -> None:
@@ -356,6 +374,13 @@ def _sample(args: argparse.Namespace, _deps: Deps) -> None:
 def _land(args: argparse.Namespace, deps: Deps) -> None:
     report = run_land(args.workdir, deps.land)
     print(f"sea_cells={report.sea_cells} sea_photos={report.sea_photos}")
+
+
+def _diversity(args: argparse.Namespace, deps: Deps) -> None:
+    hub = deps.hub(args.repo_id, args.offline)
+    options = {"per_cell": args.per_cell, "min_photos": args.min_photos, "workers": args.workers}
+    table = run_diversity(args.workdir, args.model, hub, **options)
+    print(f"diversity_cells={table.num_rows}")
 
 
 def _embed(args: argparse.Namespace, deps: Deps) -> None:

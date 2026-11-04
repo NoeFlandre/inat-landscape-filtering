@@ -1,7 +1,6 @@
 """Score stage: zero-shot SigLIP scores from the stored image embeddings."""
 
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -109,8 +108,7 @@ def _score_shards(
 ) -> tuple[np.ndarray, dict[str, np.ndarray], int, int]:
     """Score every shard. Return the ids (first copy of each), their scores, the length of the
     embeddings and the count of rows (a photo of two observations can have two rows)."""
-    with ThreadPoolExecutor(workers) as pool:
-        done = list(pool.map(shards.score, shards.store.shards()))
+    done = shards.store.each(shards.score, workers)
     ids = [i for i, _, _ in done]
     dim = max((d for _, _, d in done), default=0)
     return (*_first_copies(ids, [p for _, p, _ in done]), dim, sum(len(i) for i in ids))

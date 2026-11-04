@@ -12,3 +12,9 @@ def h3_cells(lat: NDArray[np.floating], lon: NDArray[np.floating], res: int) -> 
     if len(lat) == 0:
         return np.zeros(0, dtype=np.int64)
     return _cell(lat, lon, res).astype(np.int64)
+
+
+def cell_centers(cells: NDArray[np.integer]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the latitude and longitude of the centre of each H3 cell."""
+    points = np.array([h3.cell_to_latlng(int(c)) for c in cells], dtype=float).reshape(-1, 2)
+    return points[:, 0], points[:, 1]

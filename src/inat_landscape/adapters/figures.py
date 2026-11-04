@@ -17,6 +17,7 @@ BG = "#fbfbf9"
 INK = "#24343f"
 MUTED = "#5b6670"
 LINE = "#5f6f78"
+GREENS = ("#e4eed9", "#b9d59c", "#86b766", "#5a9640", "#3a7429", "#22531a", "#123510")
 BLUES = ("#b9d3f5", "#86b4ef", "#5596e6", "#2b78d6", "#1c5aa8", "#11407e", "#0b2f61")
 KEPT = "#b8622f"
 PANEL = {
@@ -139,9 +140,14 @@ def _dataset(ax: plt.Axes, *, with_images: bool) -> None:
     ax.text(140, 10, "geolocated\nphotos", va="center", fontsize=12, fontweight="bold", color=INK)
 
 
-Points = tuple[Sequence[float | None], Sequence[float | None]]  # longitudes, latitudes
+_Axis = Sequence[float | None] | np.ndarray
+Points = tuple[_Axis, _Axis]  # longitudes, latitudes
 CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
+CellValues = tuple[np.ndarray, np.ndarray, np.ndarray]  # lon, lat, one value per cell
 _MAX_LINEAR_BINS = 12
+_EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
+_MAP_SIZE = (16, 8.6)
+_LOOK_STEP = 0.5  # degrees
 Box = tuple[float, float, float, float]  # x, y, width, height
 
 
@@ -179,17 +185,99 @@ def _chip(ax: plt.Axes, box: Box, label: str, tone: str) -> None:
 def world_map(path: Path, pool: Points, cells: CellCounts, *, cap: int, res: int) -> None:
     """Draw how full the H3 cells are against the cap (mean per 2° hexagon), over the full
     sample in grey."""
-    fig, ax = plt.subplots(figsize=(16, 8.6))
+    fig, ax = plt.subplots(figsize=_MAP_SIZE)
     _hexbin(ax, pool, ListedColormap(["#e6e6e3"]))
     bounds = _cap_bounds(cap)
-    colors = LinearSegmentedColormap.from_list("blues", BLUES)(np.linspace(0, 1, len(bounds) - 1))
-    norm = BoundaryNorm(bounds, len(bounds) - 1)
     lon, lat, count = cells
-    filled = _hexbin(ax, (lon, lat), ListedColormap(colors), norm, values=count)
-    ax.set(xlim=(-180, 180), ylim=(-60, 84), aspect="equal")
+    filled = _hexbin(ax, (lon, lat), _palette(BLUES, len(bounds) - 1), _norm(bounds), count)
+    labels = [_bin_label(lo, hi) for lo, hi in pairwise(bounds)]
+    label = (
+        f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon "
+        "(grey: the full sample)"
+    )
+    _colorbar(fig, ax, filled, bounds, labels, label)
+    _world(ax)
+    _save(fig, path)
+
+
+def diversity_map(path: Path, cells: CellValues, *, per_cell: int, res: int) -> None:
+    """Draw the visual diversity of each H3 cell (mean per 2° hexagon), in 10 quantile bins."""
+    fig, ax = plt.subplots(figsize=_MAP_SIZE)
+    lon, lat, values = cells
+    bounds = _quantile_bounds(np.asarray(values, float), 10)
+    filled = _hexbin(ax, (lon, lat), _palette(GREENS, len(bounds) - 1), _norm(bounds), values)
+    labels = [f"{lo:.2f}" for lo in bounds[:-1]]
+    label = (
+        f"Visual diversity per H3 cell (resolution {res}): mean cosine distance between the "
+        f"embeddings of {per_cell} photos, mean per 2° hexagon"
+    )
+    _colorbar(fig, ax, filled, bounds, labels, label)
+    _world(ax)
+    _save(fig, path)
+
+
+def look_map(path: Path, lon: np.ndarray, lat: np.ndarray, rgb: np.ndarray) -> None:
+    """Draw a colour per H3 cell (mean per 0.5° square): similar colours, similar photos."""
+    fig, ax = plt.subplots(figsize=_MAP_SIZE)
+    image = grid_mean(np.asarray(lon, float), np.asarray(lat, float), rgb, _LOOK_STEP)
+    ax.imshow(image, origin="lower", extent=_EXTENT, interpolation="nearest")
+    ax.text(
+        0.5,
+        -0.02,
+        "What the photos show: the 3 first principal components of the mean embedding of each "
+        "H3 cell, as red, green and blue (similar colours: similar photos)",
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=13,
+        color=MUTED,
+    )
+    _world(ax)
+    _save(fig, path)
+
+
+def grid_mean(lon: np.ndarray, lat: np.ndarray, values: np.ndarray, step: float) -> np.ndarray:
+    """Return the mean of `values` (rows of c channels) in each `step`° square of the map,
+    as an RGBA image: the squares with no value are transparent."""
+    west, east, south, north = _EXTENT
+    shape = (round((north - south) / step), round((east - west) / step))
+    col = np.clip(((lon - west) / step).astype(int), 0, shape[1] - 1)
+    row = np.clip(((lat - south) / step).astype(int), 0, shape[0] - 1)
+    inside = (lat >= south) & (lat < north)
+    flat = row[inside] * shape[1] + col[inside]
+    counts = np.bincount(flat, minlength=shape[0] * shape[1])
+    channels = [np.bincount(flat, values[inside, c], shape[0] * shape[1]) for c in range(3)]
+    with np.errstate(invalid="ignore"):
+        rgb = np.stack(channels, axis=1) / counts[:, None]
+    alpha = (counts > 0).astype(float)[:, None]
+    return np.concatenate([np.nan_to_num(rgb), alpha], axis=1).reshape(*shape, 4)
+
+
+def _quantile_bounds(values: np.ndarray, bins: int) -> list[float]:
+    """Return the edges of `bins` bins with the same count of values (fewer if values repeat).
+    The largest value is in the last bin."""
+    edges = np.unique(np.quantile(values, np.linspace(0, 1, bins + 1)))
+    return [float(edges[0]), *edges[1:-1].tolist(), float(np.nextafter(edges[-1], np.inf))]
+
+
+def _palette(colors: Sequence[str], n: int) -> ListedColormap:
+    return ListedColormap(LinearSegmentedColormap.from_list("ramp", colors)(np.linspace(0, 1, n)))
+
+
+def _norm(bounds: Sequence[float]) -> BoundaryNorm:
+    return BoundaryNorm(bounds, len(bounds) - 1)
+
+
+def _world(ax: plt.Axes) -> None:
+    ax.set(xlim=_EXTENT[:2], ylim=_EXTENT[2:], aspect="equal")
     ax.axis("off")
+
+
+def _colorbar(
+    fig: plt.Figure, ax: plt.Axes, mappable, bounds: Sequence[float], labels: list[str], label: str
+) -> None:
     bar = fig.colorbar(
-        filled,
+        mappable,
         ax=ax,
         orientation="horizontal",
         fraction=0.04,
@@ -197,16 +285,10 @@ def world_map(path: Path, pool: Points, cells: CellCounts, *, cap: int, res: int
         aspect=45,
         ticks=[(lo + hi) / 2 for lo, hi in pairwise(bounds)],
     )
-    bar.ax.set_xticklabels([_bin_label(lo, hi) for lo, hi in pairwise(bounds)])
+    bar.ax.set_xticklabels(labels)
     bar.outline.set_visible(False)
     bar.ax.tick_params(length=0, labelsize=12, colors=MUTED)
-    bar.set_label(
-        f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon "
-        "(grey: the full sample)",
-        fontsize=13,
-        color=MUTED,
-    )
-    _save(fig, path)
+    bar.set_label(label, fontsize=13, color=MUTED)
 
 
 def _cap_bounds(cap: int) -> list[float]:
@@ -225,7 +307,7 @@ def _hexbin(
     points: Points,
     cmap: ListedColormap,
     norm: BoundaryNorm | None = None,
-    values: Sequence[float] | None = None,
+    values: Sequence[float] | np.ndarray | None = None,
 ):
     x, y = _finite(points) if values is None else (np.asarray(points[0]), np.asarray(points[1]))
     return ax.hexbin(
@@ -234,7 +316,7 @@ def _hexbin(
         C=None if values is None else np.asarray(values, dtype=float),
         reduce_C_function=np.mean,
         gridsize=(180, 72),
-        extent=(-180, 180, -60, 84),
+        extent=_EXTENT,
         linewidths=0,
         mincnt=1,
         cmap=cmap,

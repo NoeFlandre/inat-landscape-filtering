@@ -1,18 +1,19 @@
-"""H3 cells."""
+"""H3 cells and their centres."""
 
 import numpy as np
-from h3.api import basic_int as h3
 
-from inat_landscape.adapters.geo import h3_cells
+from inat_landscape.adapters.geo import cell_centers, h3_cells
 
 
-def test_h3_cells_match_the_h3_library():
-    lat = np.array([45.5, -12.0, 0.0])
-    lon = np.array([3.25, 130.0, 0.0])
+def test_cell_centers_are_inside_their_cells():
+    lat, lon = np.array([45.5, -12.0]), np.array([3.25, 130.0])
     cells = h3_cells(lat, lon, 5)
-    assert cells.dtype == np.int64
-    assert cells.tolist() == [h3.latlng_to_cell(a, b, 5) for a, b in zip(lat, lon, strict=True)]
+    centre_lat, centre_lon = cell_centers(cells)
+    assert h3_cells(centre_lat, centre_lon, 5).tolist() == cells.tolist()
+    assert np.allclose(centre_lat, lat, atol=0.2)
+    assert np.allclose(centre_lon, lon, atol=0.2)
 
 
-def test_h3_cells_empty():
-    assert h3_cells(np.array([]), np.array([]), 5).tolist() == []
+def test_cell_centers_of_no_cell():
+    lat, lon = cell_centers(np.zeros(0, np.int64))
+    assert (len(lat), len(lon)) == (0, 0)

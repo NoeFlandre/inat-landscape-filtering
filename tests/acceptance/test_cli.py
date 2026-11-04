@@ -70,6 +70,9 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "land") == 0
     assert _run(deps, tmp_path, "embed", "--prune", "--workers", "2") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
+    diversity = ["diversity", "--workers", "2", "--min-photos", "2"]
+    diversity += ["--model", FakeEncoder.model_id]
+    assert _run(deps, tmp_path, *diversity) == 0
     cache = str(tmp_path / "cache")
     assert _run(deps, tmp_path, "score", "--cache", cache, "--workers", "2") == 0
     assert list((tmp_path / "cache").rglob("*.parquet"))
@@ -86,6 +89,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert "snapshot=" in out
     assert "sea_cells=0 sea_photos=0" in out
     assert "pruned_shards=0 pruned_rows=0" in out
+    assert "diversity_cells=" in out
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out

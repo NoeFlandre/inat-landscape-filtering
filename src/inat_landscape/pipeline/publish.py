@@ -16,17 +16,20 @@ from inat_landscape.adapters.files import (
     read_table,
     write_table,
 )
+from inat_landscape.adapters.geo import cell_centers
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
 from inat_landscape.adapters.hub import REPO_ID, Hub
 from inat_landscape.adapters.images import decode, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
 from inat_landscape.domain.cells import top_per_cell
+from inat_landscape.domain.diversity import to_unit_range
 from inat_landscape.domain.examples import band_label, pick_examples, score_bands
 from inat_landscape.domain.layers import complete_cap
 from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS, NEGATIVE_PROMPTS
 from inat_landscape.domain.stats import key_quantiles
 from inat_landscape.domain.thresholds import config_name
+from inat_landscape.pipeline.diversity import read_diversity
 from inat_landscape.pipeline.embed import (
     HUB_DIR,
     SCORING_SIZE,
@@ -230,7 +233,17 @@ def _card_info(
         h3_res=params.get("res", 0),
         with_images=spec.images,
         **_sea(workdir),
+        **_diversity_info(workdir),
     )
+
+
+def _diversity_info(workdir: Path) -> dict:
+    """Return the photos per cell of the diversity maps (none: no diversity stage)."""
+    found = read_diversity(workdir)
+    if found is None:
+        return {}
+    params = found[1]
+    return {"diversity_per_cell": params["per_cell"], "diversity_min_photos": params["min_photos"]}
 
 
 def _sea(workdir: Path) -> dict:
@@ -277,6 +290,7 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
         cap=params.get("cap", spec.cap_per_cell),
         res=params.get("res", 5),
     )
+    _diversity_maps(folder, workdir, params.get("res", 5))
     figures.score_histogram(
         folder / "scores.png",
         table[spec.score].to_pylist(),
@@ -284,6 +298,20 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
         label=spec.score,
         log=spec.score == SCORE,
     )
+
+
+def _diversity_maps(folder: Path, workdir: Path, res: int) -> None:
+    """Draw the visual diversity and the colour of each cell, if the diversity stage ran."""
+    found = read_diversity(workdir)
+    if found is None:
+        return
+    table, params = found
+    lat, lon = cell_centers(table["h3_cell"].to_numpy())
+    values = table["diversity"].to_numpy()
+    per_cell = params["per_cell"]
+    figures.diversity_map(folder / "diversity.png", (lon, lat, values), per_cell=per_cell, res=res)
+    pcs = np.stack([table[f"pc{i}"].to_numpy() for i in (1, 2, 3)], axis=1)
+    figures.look_map(folder / "look.png", lon, lat, to_unit_range(pcs))
 
 
 def _examples(path: Path, table: pa.Table, spec: PublishSpec, fetcher: Fetcher) -> None:
