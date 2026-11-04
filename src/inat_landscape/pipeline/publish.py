@@ -38,8 +38,8 @@ from inat_landscape.pipeline.embed import (
     read_sample,
 )
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ingest import CANDIDATES, MANIFEST
-from inat_landscape.pipeline.land import LAND, LAND_REPORT, land_only
+from inat_landscape.pipeline.ingest import MANIFEST
+from inat_landscape.pipeline.land import LAND, LAND_REPORT
 from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
@@ -111,6 +111,16 @@ def run_publish(
         delete=delete,
     )
     return PublishReport(table.num_rows, subsets, int((kept[0] & ~has_image).sum()))
+
+
+def run_maps(workdir: Path, hub: Hub) -> None:
+    """Draw the diversity maps again and upload them alone: the card does not change."""
+    if read_diversity(workdir) is None:
+        raise StageError(f"no diversity at {workdir}: run `diversity` first")
+    root = workdir / HUB_DIR
+    _diversity_maps(root / "assets", workdir, _params(workdir).get("res", 5))
+    maps = ["assets/diversity.png", "assets/look.png"]
+    hub.upload_folder(root, "Update the diversity maps", allow=maps, delete=[])
 
 
 def _write_all(workdir: Path) -> tuple[pa.Table, int | None]:
@@ -266,9 +276,6 @@ def _years(table: pa.Table) -> tuple[str, str]:
 
 
 def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) -> None:
-    pool = land_only(
-        workdir, read_table(workdir / CANDIDATES, ["longitude", "latitude", "h3_cell"])
-    )
     params = _params(workdir)
     per_cell = table.group_by("h3_cell").aggregate(
         [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]
@@ -279,13 +286,9 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
         per_cell["h3_cell_count"].to_pylist(),
     )
 
-    def xy(t: pa.Table) -> tuple[list[float], list[float]]:
-        return t["longitude"].to_pylist(), t["latitude"].to_pylist()
-
     figures.pipeline(folder / "hero.png", with_images=spec.images, land=(workdir / LAND).exists())
     figures.world_map(
         folder / "map.png",
-        xy(pool),
         cells,
         cap=params.get("cap", spec.cap_per_cell),
         res=params.get("res", 5),

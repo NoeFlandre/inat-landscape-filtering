@@ -13,16 +13,15 @@ def test_pipeline_figure(tmp_path):
     assert (tmp_path / "a" / "hero.png").read_bytes()[:8] == PNG
 
 
-def test_world_map_skips_missing_coordinates(tmp_path):
-    pool = ([0.0, 10.0, None], [0.0, 5.0, None])
+def test_world_map(tmp_path):
     cells = ([0.0, 20.0], [0.0, 10.0], [3, 10])
-    figures.world_map(tmp_path / "map.png", pool, cells, cap=10, res=5)
+    figures.world_map(tmp_path / "map.png", cells, cap=10, res=5)
     assert (tmp_path / "map.png").read_bytes()[:8] == PNG
 
 
 def test_world_map_with_a_large_cap(tmp_path):
     cells = ([0.0], [0.0], [700])
-    figures.world_map(tmp_path / "m.png", ([0.0], [0.0]), cells, cap=1000, res=5)
+    figures.world_map(tmp_path / "m.png", cells, cap=1000, res=5)
     assert (tmp_path / "m.png").read_bytes()[:8] == PNG
 
 
@@ -86,18 +85,6 @@ def test_look_map(tmp_path):
     rgb = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
     figures.look_map(tmp_path / "l.png", np.array([0.0, 100.0]), np.array([0.0, -30.0]), rgb)
     assert (tmp_path / "l.png").read_bytes()[:8] == PNG
-
-
-def test_grid_mean_averages_each_square_and_leaves_the_others_transparent():
-    lon = np.array([-179.9, -179.8, 179.9, 0.0])
-    lat = np.array([-59.9, -59.9, 83.9, 90.0])  # the last one is out of the map
-    values = np.array([[1.0, 0, 0], [0.0, 0, 1], [0.0, 1, 0], [1.0, 1, 1]])
-    image = figures.grid_mean(lon, lat, values, 1.0)
-    assert image.shape == (144, 360, 4)
-    assert image[0, 0].tolist() == [0.5, 0.0, 0.5, 1.0]
-    assert image[143, 359].tolist() == [0.0, 1.0, 0.0, 1.0]
-    assert image[:, :, 3].sum() == 2
-    assert image[50, 50].tolist() == [0.0, 0.0, 0.0, 0.0]
 
 
 def test_diversity_map_of_one_value(tmp_path):

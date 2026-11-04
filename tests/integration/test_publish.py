@@ -15,7 +15,7 @@ from inat_landscape.pipeline.diversity import run_diversity
 from inat_landscape.pipeline.embed import HUB_DIR, EmbedOptions, run_embed
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.land import run_land
-from inat_landscape.pipeline.publish import PublishSpec, run_publish
+from inat_landscape.pipeline.publish import PublishSpec, run_maps, run_publish
 from inat_landscape.pipeline.score import run_score
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
@@ -242,13 +242,13 @@ def test_publish_after_the_land_stage_leaves_out_the_cells_at_sea(scored, monkey
     run_land(workdir, lambda: [{"type": "Polygon", "coordinates": [square]}])
     run_score(workdir, FakeEncoder(), hub)
     maps = []
-    monkeypatch.setattr(figures, "world_map", lambda path, pool, *a, **k: maps.append(pool))
+    monkeypatch.setattr(figures, "world_map", lambda path, cells, **k: maps.append(cells))
     _publish(workdir, hub, (0.0,))
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "**2 iNaturalist photos of all taxa (2 with a location)" in card
     assert "the 2 photos of 2 cells at sea are left out." in card
     assert sorted(_remote(hub, "all")["photo_id"].to_pylist()) == [101, 102]
-    assert maps == [([3.25, 3.25], [45.5, 45.5])]
+    assert maps == [([3.25], [45.5], [2])]  # one cell on land, with 101 and 102
 
 
 def test_publish_draws_the_diversity_maps_after_the_diversity_stage(scored):
@@ -260,3 +260,18 @@ def test_publish_draws_the_diversity_maps_after_the_diversity_stage(scored):
     assert "50 random photos of the cell" in card
     for name in ("diversity", "look"):
         assert (workdir / HUB_DIR / "assets" / f"{name}.png").read_bytes()[:4] == b"\x89PNG"
+
+
+def test_maps_only_uploads_the_two_diversity_maps(scored):
+    workdir, hub, _, _ = scored
+    run_diversity(workdir, FakeEncoder.model_id, hub, min_photos=2)
+    run_maps(workdir, hub)
+    assert hub.folder_uploads[-1] == (["assets/diversity.png", "assets/look.png"], [])
+    assert {"assets/diversity.png", "assets/look.png"} <= set(hub.list_files("assets/"))
+    assert "README.md" not in hub.list_files("")
+
+
+def test_maps_only_needs_the_diversity_stage(scored):
+    workdir, hub, _, _ = scored
+    with pytest.raises(StageError, match="diversity"):
+        run_maps(workdir, hub)

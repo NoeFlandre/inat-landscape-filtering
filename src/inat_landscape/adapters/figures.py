@@ -137,14 +137,13 @@ def _dataset(ax: plt.Axes, *, with_images: bool) -> None:
     ax.text(140, 10, "geolocated\nphotos", va="center", fontsize=12, fontweight="bold", color=INK)
 
 
-_Axis = Sequence[float | None] | np.ndarray
+_Axis = Sequence[float] | np.ndarray
 Points = tuple[_Axis, _Axis]  # longitudes, latitudes
 CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
 CellValues = tuple[np.ndarray, np.ndarray, np.ndarray]  # lon, lat, one value per cell
 _MAX_LINEAR_BINS = 12
 _EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
 _MAP_SIZE = (16, 8.6)
-_LOOK_STEP = 0.5  # degrees
 _CHIP_FONT = 12
 _MIN_FONT = 6  # a chip label does not get smaller than this
 Box = tuple[float, float, float, float]  # x, y, width, height
@@ -194,19 +193,14 @@ def _fit(ax: plt.Axes, text: plt.Text, width: float, height: float) -> None:
         text.set_fontsize(size)
 
 
-def world_map(path: Path, pool: Points, cells: CellCounts, *, cap: int, res: int) -> None:
-    """Draw how full the H3 cells are against the cap (mean per 2° hexagon), over the full
-    sample in grey."""
+def world_map(path: Path, cells: CellCounts, *, cap: int, res: int) -> None:
+    """Draw how full the H3 cells are against the cap (mean per 2° hexagon)."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _hexbin(ax, pool, ListedColormap(["#e6e6e3"]))
     bounds = _cap_bounds(cap)
     lon, lat, count = cells
-    filled = _hexbin(ax, (lon, lat), _palette(BLUES, len(bounds) - 1), _norm(bounds), count)
+    filled = _hexbin(ax, (lon, lat), count, _palette(BLUES, len(bounds) - 1), _norm(bounds))
     labels = [_bin_label(lo, hi) for lo, hi in pairwise(bounds)]
-    label = (
-        f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon "
-        "(grey: the full sample)"
-    )
+    label = f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon"
     _colorbar(fig, ax, filled, bounds, labels, label)
     _world(ax)
     _save(fig, path)
@@ -217,7 +211,7 @@ def diversity_map(path: Path, cells: CellValues, *, per_cell: int, res: int) -> 
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
     lon, lat, values = cells
     bounds = _quantile_bounds(np.asarray(values, float), 10)
-    filled = _hexbin(ax, (lon, lat), _palette(GREENS, len(bounds) - 1), _norm(bounds), values)
+    filled = _hexbin(ax, (lon, lat), values, _palette(GREENS, len(bounds) - 1), _norm(bounds))
     labels = [f"{lo:.2f}" for lo in bounds[:-1]]
     label = (
         f"Visual diversity per H3 cell (resolution {res}): mean cosine distance between the "
@@ -229,15 +223,22 @@ def diversity_map(path: Path, cells: CellValues, *, per_cell: int, res: int) -> 
 
 
 def look_map(path: Path, lon: np.ndarray, lat: np.ndarray, rgb: np.ndarray) -> None:
-    """Draw a colour per H3 cell (mean per 0.5° square): similar colours, similar photos."""
+    """Draw the colour of each H3 cell (mean per 2° hexagon, as in the other maps): similar
+    colours, similar photos."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    image = grid_mean(np.asarray(lon, float), np.asarray(lat, float), rgb, _LOOK_STEP)
-    ax.imshow(image, origin="lower", extent=_EXTENT, interpolation="nearest")
+    black = ListedColormap(["#000000"])
+    channels = [_hexbin(ax, (lon, lat), rgb[:, c], black) for c in range(3)]
+    colors = np.stack([np.asarray(c.get_array()) for c in channels], axis=1)
+    for extra in channels[1:]:  # same hexagons: keep one collection, with the RGB colours
+        extra.remove()
+    channels[0].set_array(None)
+    channels[0].set_facecolor(colors)
     ax.text(
         0.5,
         -0.02,
         "What the photos show: the 3 first principal components of the mean embedding of each "
-        "H3 cell, as red, green and blue (similar colours: similar photos)",
+        "H3 cell (resolution 5) as red, green and blue, mean per 2° hexagon (similar colours: "
+        "similar photos)",
         transform=ax.transAxes,
         ha="center",
         va="top",
@@ -246,23 +247,6 @@ def look_map(path: Path, lon: np.ndarray, lat: np.ndarray, rgb: np.ndarray) -> N
     )
     _world(ax)
     _save(fig, path)
-
-
-def grid_mean(lon: np.ndarray, lat: np.ndarray, values: np.ndarray, step: float) -> np.ndarray:
-    """Return the mean of `values` (rows of c channels) in each `step`° square of the map,
-    as an RGBA image: the squares with no value are transparent."""
-    west, east, south, north = _EXTENT
-    shape = (round((north - south) / step), round((east - west) / step))
-    col = np.clip(((lon - west) / step).astype(int), 0, shape[1] - 1)
-    row = np.clip(((lat - south) / step).astype(int), 0, shape[0] - 1)
-    inside = (lat >= south) & (lat < north)
-    flat = row[inside] * shape[1] + col[inside]
-    counts = np.bincount(flat, minlength=shape[0] * shape[1])
-    channels = [np.bincount(flat, values[inside, c], shape[0] * shape[1]) for c in range(3)]
-    with np.errstate(invalid="ignore"):
-        rgb = np.stack(channels, axis=1) / counts[:, None]
-    alpha = (counts > 0).astype(float)[:, None]
-    return np.concatenate([np.nan_to_num(rgb), alpha], axis=1).reshape(*shape, 4)
 
 
 def _quantile_bounds(values: np.ndarray, bins: int) -> list[float]:
@@ -317,15 +301,15 @@ def _bin_label(lo: float, hi: float) -> str:
 def _hexbin(
     ax: plt.Axes,
     points: Points,
+    values: Sequence[float] | np.ndarray,
     cmap: ListedColormap,
     norm: BoundaryNorm | None = None,
-    values: Sequence[float] | np.ndarray | None = None,
 ):
-    x, y = _finite(points) if values is None else (np.asarray(points[0]), np.asarray(points[1]))
+    """Draw the mean of `values` in each 2° hexagon that has a point."""
     return ax.hexbin(
-        x,
-        y,
-        C=None if values is None else np.asarray(values, dtype=float),
+        np.asarray(points[0], float),
+        np.asarray(points[1], float),
+        C=np.asarray(values, dtype=float),
         reduce_C_function=np.mean,
         gridsize=(180, 72),
         extent=_EXTENT,
@@ -334,12 +318,6 @@ def _hexbin(
         cmap=cmap,
         norm=norm,
     )
-
-
-def _finite(points: Points) -> tuple[np.ndarray, np.ndarray]:
-    xy = np.array([[np.nan if v is None else v for v in axis] for axis in points], dtype=float)
-    keep = np.isfinite(xy).all(axis=0)
-    return xy[0, keep], xy[1, keep]
 
 
 def score_histogram(

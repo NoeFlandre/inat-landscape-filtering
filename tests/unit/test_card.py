@@ -260,8 +260,8 @@ def test_card_explains_the_three_maps():
     info = _info()
     assert (
         f"For each H3 cell (resolution {info.h3_res}), the count of published photos, at most "
-        f"{info.embed_cap:,}. A hexagon of the map is 2° wide and gives the mean of its cells. "
-        "Grey: the places of the full sample.\n" in text
+        f"{info.embed_cap:,}. A hexagon of the map is 2° wide and gives the mean of its cells.\n"
+        in text
     )
 
 
@@ -269,3 +269,7 @@ def test_card_without_the_diversity_maps_has_one_map():
     text = render_card(_info())
     assert "diversity.png" not in text
     assert "Each map gives" not in text
+
+
+def test_the_map_has_no_grey_layer():
+    assert "grey" not in render_card(replace(_info(), diversity_per_cell=50)).lower()

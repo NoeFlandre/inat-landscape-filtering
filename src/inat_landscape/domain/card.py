@@ -220,8 +220,7 @@ one photo with its location, date, taxon, licence and scores. The goal is a set 
 ground-level photos that show land use and land cover, to pair with remote sensing. \
 {_progress(info)} The scores have no human validation yet.
 
-![How full the H3 cells are against the cap of {info.embed_cap} photos, with the full sample \
-in grey](assets/map.png)
+![How full the H3 cells are against the cap of {info.embed_cap} photos](assets/map.png)
 {_diversity_maps(info)}"""
 
 
@@ -430,7 +429,7 @@ def _diversity_maps(info: CardInfo) -> str:
     return f"""
 **Map 1, photos per cell.** For each H3 cell (resolution {info.h3_res}), the count of \
 published photos, at most {info.embed_cap:,}. A hexagon of the map is 2° wide and gives the \
-mean of its cells. Grey: the places of the full sample.
+mean of its cells.
 
 ![Visual diversity of each H3 cell](assets/diversity.png)
 

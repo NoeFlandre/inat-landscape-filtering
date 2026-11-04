@@ -36,7 +36,7 @@ from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.land import run_land
 from inat_landscape.pipeline.ports import Encoder
-from inat_landscape.pipeline.publish import PublishSpec, run_publish
+from inat_landscape.pipeline.publish import PublishSpec, run_maps, run_publish
 from inat_landscape.pipeline.sample import run_sample, run_worklist
 from inat_landscape.pipeline.score import SCORE, run_score
 from inat_landscape.pipeline.state import STATE_FILES, pull_state, push_state
@@ -338,6 +338,11 @@ def _add_publish(sub: argparse._SubParsersAction) -> None:
         help="put the 500 px image in the threshold configs, uploaded in parts "
         "(--no-images: metadata only, a quick refresh during a run)",
     )
+    p.add_argument(
+        "--maps-only",
+        action="store_true",
+        help="only draw and upload the diversity maps again (after `diversity`)",
+    )
     p.set_defaults(handler=_publish)
 
 
@@ -432,6 +437,10 @@ def _score(args: argparse.Namespace, deps: Deps) -> None:
 
 
 def _publish(args: argparse.Namespace, deps: Deps) -> None:
+    if args.maps_only:
+        run_maps(args.workdir, deps.hub(args.repo_id, args.offline))
+        print("maps=assets/diversity.png,assets/look.png")
+        return
     spec = PublishSpec(
         args.thresholds, score=args.score, cap_per_cell=args.cap_per_cell, images=args.images
     )
