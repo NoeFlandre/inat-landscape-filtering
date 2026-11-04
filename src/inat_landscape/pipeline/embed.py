@@ -22,6 +22,7 @@ from inat_landscape.adapters.images import Fetched, decode, fetch
 from inat_landscape.adapters.inat_dump import PHOTO_URL
 from inat_landscape.domain.sampling import Slots, in_slots
 from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.land import LAND, on_land
 from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
 
@@ -82,14 +83,29 @@ def worker_tag(worker: Slots) -> str:
 def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
     """Return the sample table, or fail if the sample stage did not run.
 
-    For the photo ids and extensions only, the small `sample-ids.parquet` is enough.
+    After the land stage, the photos of the cells at sea are left out (ADR 0013). For the
+    photo ids and extensions only, the small `sample-ids.parquet` is enough.
     """
-    slim = workdir / SAMPLE_IDS
-    if columns and set(columns) <= {"photo_id", "extension"} and slim.exists():
-        return read_table(slim, columns)
+    if _slim_is_enough(workdir, columns):
+        return read_table(workdir / SAMPLE_IDS, columns)
     if not (workdir / SAMPLE).exists():
         raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
-    return read_table(workdir / SAMPLE, columns)
+    if columns is None:
+        return _on_land(workdir, read_table(workdir / SAMPLE))
+    table = read_table(workdir / SAMPLE, list(dict.fromkeys([*columns, "h3_cell"])))
+    return _on_land(workdir, table).select(columns)
+
+
+def _slim_is_enough(workdir: Path, columns: list[str] | None) -> bool:
+    """Tell if `sample-ids.parquet` has the columns, and no land filter applies."""
+    ids_only = bool(columns) and set(columns or ()) <= {"photo_id", "extension"}
+    return ids_only and (workdir / SAMPLE_IDS).exists() and not (workdir / LAND).exists()
+
+
+def _on_land(workdir: Path, table: pa.Table) -> pa.Table:
+    """Leave out the photos of the cells at sea, if the land stage ran."""
+    keep = on_land(workdir, table["h3_cell"].to_numpy())
+    return table if keep is None else table.filter(pa.array(keep))
 
 
 @dataclass(frozen=True)
@@ -121,6 +137,15 @@ def _work(workdir: Path, model_id: str, hub: Hub, worker: Slots) -> _Work:
         permanent,
         _todo(rows, done | permanent),
     )
+
+
+def prune_embeddings(
+    workdir: Path, model_id: str, hub: Hub, *, workers: int = 1
+) -> tuple[int, int]:
+    """Remove from the hub shards the photos that are not in the sample (after the land
+    stage: the photos at sea). Return the count of shards rewritten and of rows removed."""
+    keep = read_sample(workdir, ["photo_id"])["photo_id"].to_numpy()
+    return open_store(workdir, model_id, hub).prune(keep, workers=workers)
 
 
 def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: Slots = ONE_WORKER) -> int:

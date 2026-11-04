@@ -12,6 +12,8 @@ import json
 import re
 import shutil
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +136,47 @@ class EmbeddingStore:
         rows = table["embedding"].combine_chunks().flatten().to_numpy()
         return table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
 
+    def prune(self, keep: np.ndarray, *, workers: int = 1, batch: int = 50) -> tuple[int, int]:
+        """Remove from the remote shards the photos that are not in `keep`. Return the count of
+        shards rewritten and of rows removed.
+
+        A shard with rows to remove is replaced by a shard of its kept rows, with the same tag.
+        Each commit replaces `batch` shards at most (the hub limits the commits per hour). The
+        done-ids snapshot is deleted: it lists removed ids.
+        """
+        shards = self._remote_shards()
+        batches = [shards[start : start + batch] for start in range(0, len(shards), batch)]
+        counts = np.array([self._prune_batch(b, keep, workers) for b in batches]).reshape(-1, 2)
+        return int(counts[:, 0].sum()), int(counts[:, 1].sum())
+
+    def _prune_batch(self, chunk: list[str], keep: np.ndarray, workers: int) -> tuple[int, int]:
+        """Replace the shards of `chunk` that have rows to remove, in one commit."""
+        with ThreadPoolExecutor(workers) as pool:
+            changed = [p for p in pool.map(self._pruned, chunk, [keep] * len(chunk)) if p.removed]
+        if changed:
+            self._replace(changed)
+        return len(changed), sum(p.removed for p in changed)
+
+    def _replace(self, changed: list["_Pruned"]) -> None:
+        new = [p.new for p in changed if p.new]
+        gone = [*(p.path for p in changed), self._snapshot_path]
+        self.hub.upload_folder(self.root, f"Prune {len(changed)} embedding shards", new, gone)
+        for name in new:
+            (self.root / name).unlink()
+
+    def _pruned(self, path: str, keep: np.ndarray) -> "_Pruned":
+        """Write the kept rows of a remote shard as a new local shard, if it has rows to
+        remove and rows to keep."""
+        ids, embeddings = self.read(path)
+        mask = np.isin(np.asarray(ids, np.int64), keep)
+        removed = int((~mask).sum())
+        if removed == 0 or removed == len(ids):
+            return _Pruned(path, "", removed)
+        tag = path.rsplit("/", 1)[-1].removeprefix("part-").rpartition("-")[0]
+        kept = np.asarray(ids, np.int64)[mask].tolist()
+        new = _write_shard(self.root, self.remote_dir, tag, kept, embeddings[mask])
+        return _Pruned(path, str(new.relative_to(self.root)), removed)
+
     def done_ids(self) -> set[int]:
         """Return the ids of all photos that have an embedding."""
         return {
@@ -147,21 +190,36 @@ class EmbeddingStore:
         hash of its ids."""
         if len(photo_ids) != len(embeddings):
             raise ValueError("photo_ids and embeddings differ in length")
-        digest = hashlib.sha256(np.asarray(photo_ids, np.int64).tobytes()).hexdigest()[:16]
-        prefix = f"part-{self.tag}-" if self.tag else "part-"
-        name = f"{self.remote_dir}/{prefix}{digest}.parquet"
-        path = self.root / name
-        flat = pa.array(np.asarray(embeddings, np.float16).ravel())
-        column = pa.FixedSizeListArray.from_arrays(flat, embeddings.shape[1])
-        write_table(
-            pa.table({"photo_id": pa.array(photo_ids, pa.int64()), "embedding": column}), path
-        )
+        path = _write_shard(self.root, self.remote_dir, self.tag, photo_ids, embeddings)
+        name = str(path.relative_to(self.root))
         if upload:
             self.hub.upload_file(path, name, f"Add {len(photo_ids)} embeddings")
         return path
 
     def _shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))
+
+
+@dataclass(frozen=True)
+class _Pruned:
+    """One remote shard after the prune: the rows it lost, and its new shard ("" if none)."""
+
+    path: str
+    new: str
+    removed: int
+
+
+def _write_shard(
+    root: Path, remote_dir: str, tag: str, photo_ids: Sequence[int], embeddings: np.ndarray
+) -> Path:
+    """Write one shard under `root / remote_dir`. Its name is a hash of its ids."""
+    digest = hashlib.sha256(np.asarray(photo_ids, np.int64).tobytes()).hexdigest()[:16]
+    prefix = f"part-{tag}-" if tag else "part-"
+    path = root / remote_dir / f"{prefix}{digest}.parquet"
+    flat = pa.array(np.asarray(embeddings, np.float16).ravel())
+    column = pa.FixedSizeListArray.from_arrays(flat, embeddings.shape[1])
+    write_table(pa.table({"photo_id": pa.array(photo_ids, pa.int64()), "embedding": column}), path)
+    return path
 
 
 def _tag_slots(tag: str) -> Slots | None:

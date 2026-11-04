@@ -22,6 +22,8 @@ STATE_FILES = (
     "sample-ids.parquet",
     "scored.parquet",
     "failures.parquet",
+    "land.parquet",  # the cells that touch land (ADR 0013)
+    "land.json",
 )
 _PREFIX = "state/"
 

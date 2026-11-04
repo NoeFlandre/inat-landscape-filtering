@@ -31,7 +31,13 @@ def deps(tmp_path, server, monkeypatch):
         encoder=lambda *_args: FakeEncoder(),
         hub=lambda *_args: hub,
         fetcher=lambda urls, **kw: fetch(urls, backoff=0.0, **kw),
+        land=lambda: [_square(lon, lat) for lon, lat in ((3.25, 45.5), (130, -12), (20, 10))],
     )
+
+
+def _square(lon, lat):
+    corners = [(lon - 0.1, lat - 0.1), (lon + 0.1, lat - 0.1), (lon + 0.1, lat + 0.1)]
+    return {"type": "Polygon", "coordinates": [[*corners, (lon - 0.1, lat - 0.1)]]}
 
 
 def _run(deps, tmp_path, *args):
@@ -61,6 +67,8 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
     assert _run(deps, tmp_path, "embed", "--snapshot") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--max-photos", "1000") == 0
+    assert _run(deps, tmp_path, "land") == 0
+    assert _run(deps, tmp_path, "embed", "--prune", "--workers", "2") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
     cache = str(tmp_path / "cache")
     assert _run(deps, tmp_path, "score", "--cache", cache, "--workers", "2") == 0
@@ -76,6 +84,8 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert "cells=3 photos=4 max_per_cell=2" in out
     assert "worklist=4" in out
     assert "snapshot=" in out
+    assert "sea_cells=0 sea_photos=0" in out
+    assert "pruned_shards=0 pruned_rows=0" in out
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out

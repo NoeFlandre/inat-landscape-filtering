@@ -42,6 +42,9 @@ class Field:
     description: str
 
 
+_NATURAL_EARTH = "[Natural Earth](https://www.naturalearthdata.com)"
+
+
 @dataclass(frozen=True)
 class CardInfo:
     """Everything the card states about one published run."""
@@ -71,6 +74,8 @@ class CardInfo:
     with_images: bool = True  # False: the threshold configs give the image URLs only
     layer_cap: int | None = None  # complete layers of the uniform order (ADR 0011), if any
     embedding_photos: int | None = None  # None: one row per photo
+    sea_photos: int | None = None  # photos of the cells at sea, left out (None: no land filter)
+    sea_cells: int = 0
 
 
 def fields(n_prompts: int, *, with_images: bool = True) -> tuple[Field, ...]:
@@ -389,7 +394,7 @@ deterministic. Photos are in (observation UUID, photo position, photo id) order.
 [H3](https://h3geo.org) cell (resolution {info.h3_res}, \
 {_CELL_AREAS.get(info.h3_res, "see H3")}), only the first {info.embed_cap:,} photos in that \
 order are kept, so dense areas do not dominate; a larger cap keeps a superset. Photos with no \
-location are left out. This gave {info.candidates:,} photos.
+location are left out. This gave {info.candidates:,} photos.{_land(info)}
 3. **Taxa.** All taxa. `group` is the kingdom of the taxon, `unidentified` for an \
 observation with no taxon or the root taxon Life, or `other` for a taxon with no known kingdom.
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data \
@@ -409,11 +414,29 @@ Code, with the decisions and their tradeoffs: [{REPO_URL.removeprefix("https://"
 
 * **Obscured locations.** iNaturalist moves some locations (threatened taxa, user choice) \
 to a random point in a cell of about 0.2°. The source has no flag for this.
-{_missing_locations(info.no_location)}* **What the location means.** It is where the observer or \
-the organism was, not the area in view.
+{_missing_locations(info.no_location)}{_coasts(info)}* **What the location means.** \
+It is where the observer or the organism was, not the area in view.
 * **No validation.** The thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
 """
+
+
+def _land(info: CardInfo) -> str:
+    if info.sea_photos is None:
+        return ""
+    return (
+        f" Only the H3 cells that touch land are kept ({_NATURAL_EARTH} 1:10m land and minor "
+        f"islands): the {info.sea_photos:,} photos of {info.sea_cells:,} cells at sea are left out."
+    )
+
+
+def _coasts(info: CardInfo) -> str:
+    if info.sea_photos is None:
+        return ""
+    return (
+        "* **Coasts.** A cell that touches land keeps all its photos, also the photos taken "
+        "on the water near the coast.\n"
+    )
 
 
 def _progress(info: CardInfo) -> str:

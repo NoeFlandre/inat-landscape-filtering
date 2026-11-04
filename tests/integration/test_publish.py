@@ -6,12 +6,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from inat_landscape.adapters import figures
 from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.images import fetch
 from inat_landscape.domain.card import fields
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
 from inat_landscape.pipeline.embed import HUB_DIR, EmbedOptions, run_embed
 from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.land import run_land
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.score import run_score
 from tests.fakes import FakeEncoder, FakeHub
@@ -231,3 +233,18 @@ def test_publish_with_no_complete_layer_is_an_error(tmp_path, server, monkeypatc
     workdir, hub = _partly_scored(tmp_path, server, monkeypatch, max_photos=2)
     with pytest.raises(StageError, match="no complete layer"):
         _publish(workdir, hub, (0.0,))
+
+
+def test_publish_after_the_land_stage_leaves_out_the_cells_at_sea(scored, monkeypatch):
+    workdir, hub, _, _ = scored
+    square = [[3.0, 45.3], [3.5, 45.3], [3.5, 45.7], [3.0, 45.7], [3.0, 45.3]]
+    run_land(workdir, lambda: [{"type": "Polygon", "coordinates": [square]}])
+    run_score(workdir, FakeEncoder(), hub)
+    maps = []
+    monkeypatch.setattr(figures, "world_map", lambda path, pool, *a, **k: maps.append(pool))
+    _publish(workdir, hub, (0.0,))
+    card = (workdir / HUB_DIR / "README.md").read_text()
+    assert "**2 iNaturalist photos of all taxa (2 with a location)" in card
+    assert "the 2 photos of 2 cells at sea are left out." in card
+    assert sorted(_remote(hub, "all")["photo_id"].to_pylist()) == [101, 102]
+    assert maps == [([3.25, 3.25], [45.5, 45.5])]

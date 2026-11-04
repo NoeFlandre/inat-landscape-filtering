@@ -48,6 +48,8 @@ def test_state_files_cover_the_hand_off_points():
         "sample-ids.parquet",
         "scored.parquet",
         "failures.parquet",
+        "land.parquet",
+        "land.json",
     }
 
 

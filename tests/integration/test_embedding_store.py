@@ -147,3 +147,30 @@ def test_read_gives_a_remote_shard_and_keeps_no_copy(tmp_path, hub):
     assert ids == [4, 5]
     assert embeddings.shape == (2, 3)
     assert not list((tmp_path / "b").rglob("*.parquet"))
+
+
+def test_prune_rewrites_only_the_shards_with_removed_rows(tmp_path, hub):
+    first = EmbeddingStore(tmp_path / "a", DIR, hub, tag="w0of2")
+    mixed = first.add([1, 2, 3], np.array([[1.0], [2.0], [3.0]]))
+    kept = first.add([4], np.array([[4.0]]))
+    gone = EmbeddingStore(tmp_path / "a", DIR, hub).add([5], np.array([[5.0]]))
+    first.snapshot()
+    store = EmbeddingStore(tmp_path / "b", DIR, hub)
+    assert store.prune(np.array([1, 3, 4]), workers=2, batch=2) == (2, 2)
+    names = hub.list_files(DIR + "/")
+    assert f"{DIR}/{kept.name}" in names
+    assert f"{DIR}/{mixed.name}" not in names
+    assert f"{DIR}/{gone.name}" not in names
+    assert not [n for n in names if "/index/" in n]  # the snapshot lists removed ids
+    parts = {tuple(store.read(p)[0]): p for p in store.shards()}
+    assert set(parts) == {(1, 3), (4,)}
+    assert parts[(1, 3)].rsplit("/", 1)[-1].startswith("part-w0of2-")
+    assert store.read(parts[(1, 3)])[1].tolist() == [[1.0], [3.0]]
+    assert not list((tmp_path / "b").rglob("*.parquet"))
+
+
+def test_prune_with_nothing_to_remove_makes_no_commit(tmp_path, hub):
+    EmbeddingStore(tmp_path / "a", DIR, hub).add([1], np.ones((1, 2)))
+    commits = len(hub.folder_uploads)
+    assert EmbeddingStore(tmp_path / "b", DIR, hub).prune(np.array([1])) == (0, 0)
+    assert len(hub.folder_uploads) == commits

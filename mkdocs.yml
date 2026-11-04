@@ -19,4 +19,5 @@ nav:
       - adr/0010-images-in-parts.md
       - adr/0011-uniform-order.md
       - adr/0012-score-cache.md
+      - adr/0013-land-only.md
   - Technical debt: tech-debt.md

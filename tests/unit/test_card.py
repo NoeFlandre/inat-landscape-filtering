@@ -222,3 +222,22 @@ def test_card_without_copies_has_one_embedding_row_per_photo():
     card = render_card(replace(_info(), embedding_rows=12, embedding_photos=12))
     assert "The `embeddings` config has one row per photo:" in card
     assert "two rows" not in card
+
+
+def test_card_states_the_cells_at_sea_and_the_coasts():
+    text = render_card(replace(_info(), sea_photos=1234, sea_cells=56))
+    assert (
+        "Only the H3 cells that touch land are kept ([Natural Earth]"
+        "(https://www.naturalearthdata.com) 1:10m land and minor islands): the 1,234 photos of "
+        "56 cells at sea are left out." in text
+    )
+    assert (
+        "* **Coasts.** A cell that touches land keeps all its photos, also the photos taken on "
+        "the water near the coast.\n* **What the location means.**" in text
+    )
+
+
+def test_card_without_the_land_stage_says_nothing_of_the_sea():
+    text = render_card(_info())
+    assert "at sea" not in text
+    assert "Coasts" not in text

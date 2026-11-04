@@ -19,13 +19,21 @@ from huggingface_hub.errors import HfHubHTTPError
 from inat_landscape.adapters.hub import REPO_ID, STATE_REPO_ID, HfHub, Hub, OfflineHub
 from inat_landscape.adapters.images import Fetched, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
+from inat_landscape.adapters.land import fetch_land
 from inat_landscape.domain.sampling import Slots
 from inat_landscape.domain.scoring import MODEL_ID
 from inat_landscape.domain.stats import cap_report, key_quantiles, summarize
 from inat_landscape.domain.thresholds import parse_thresholds
-from inat_landscape.pipeline.embed import EmbedOptions, open_store, plan_embed, run_embed
+from inat_landscape.pipeline.embed import (
+    EmbedOptions,
+    open_store,
+    plan_embed,
+    prune_embeddings,
+    run_embed,
+)
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
+from inat_landscape.pipeline.land import run_land
 from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.publish import PublishSpec, run_publish
 from inat_landscape.pipeline.sample import run_sample, run_worklist
@@ -54,6 +62,7 @@ class Deps:
     encoder: Callable[..., Encoder] = _real_encoder
     hub: Callable[..., Hub] = _real_hub
     fetcher: Callable[..., list[Fetched]] = fetch
+    land: Callable[[], list[dict]] = fetch_land
 
 
 _QUIET_LOGGERS = ("httpx", "httpcore", "huggingface_hub", "urllib3")
@@ -108,6 +117,8 @@ def _parser() -> argparse.ArgumentParser:
     _add_ingest(sub)
     _add_worklist(sub)
     _add_sample(sub)
+    land = sub.add_parser("land", help="keep only the H3 cells that touch land (Natural Earth)")
+    land.set_defaults(handler=_land)
     _add_embed(sub)
     _add_score(sub)
     _add_publish(sub)
@@ -240,6 +251,14 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         help="only write the done-ids snapshot of the hub shards (the jobs read it at start)",
     )
     p.add_argument(
+        "--prune",
+        action="store_true",
+        help="only remove from the hub shards the photos that are not in the sample",
+    )
+    p.add_argument(
+        "--workers", type=int, default=8, help="shards that --prune reads at the same time"
+    )
+    p.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -328,15 +347,26 @@ def _sample(args: argparse.Namespace, _deps: Deps) -> None:
     print(f"sample={run_sample(args.workdir, args.n).num_rows}")
 
 
+def _land(args: argparse.Namespace, deps: Deps) -> None:
+    report = run_land(args.workdir, deps.land)
+    print(f"sea_cells={report.sea_cells} sea_photos={report.sea_photos}")
+
+
 def _embed(args: argparse.Namespace, deps: Deps) -> None:
-    if args.plan or args.snapshot:
-        hub = deps.hub(args.repo_id, args.offline)
-        if args.snapshot:
-            print(f"snapshot={open_store(args.workdir, args.model, hub).snapshot()}")
-        else:
-            print(f"todo={plan_embed(args.workdir, args.model, hub, worker=args.worker)}")
+    if args.plan or args.snapshot or args.prune:
+        print(_embed_tool(args, deps.hub(args.repo_id, args.offline)))
         return
     _run_embed(args, deps)
+
+
+def _embed_tool(args: argparse.Namespace, hub: Hub) -> str:
+    """Run one of the embed tools that load no model, and return its report line."""
+    if args.prune:
+        shards, rows = prune_embeddings(args.workdir, args.model, hub, workers=args.workers)
+        return f"pruned_shards={shards} pruned_rows={rows}"
+    if args.snapshot:
+        return f"snapshot={open_store(args.workdir, args.model, hub).snapshot()}"
+    return f"todo={plan_embed(args.workdir, args.model, hub, worker=args.worker)}"
 
 
 def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
