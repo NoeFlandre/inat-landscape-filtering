@@ -1,6 +1,7 @@
 """Score stage."""
 
 import json
+import shutil
 
 import numpy as np
 import pytest
@@ -84,3 +85,39 @@ def test_score_streams_the_shards_from_a_new_machine_and_keeps_the_first_copy(em
         "embedding_photos": 3,
     }
     assert not list((other / HUB_DIR).rglob(".stream/**/*.parquet"))
+
+
+def test_score_reuses_the_cached_shard_scores(embedded, tmp_path, monkeypatch):
+    workdir, hub = embedded
+    cache = tmp_path / "cache"
+    first = run_score(workdir, FakeEncoder(), hub, cache=cache)
+    assert list(cache.rglob("*.parquet"))
+    monkeypatch.setattr(hub, "download", _no_download)
+    shutil.rmtree(workdir / HUB_DIR)  # no local shard: only the cache can give the scores
+    again = run_score(workdir, FakeEncoder(), hub, cache=cache)
+    assert again.equals(first)
+
+
+def test_cached_scores_depend_on_the_text_directions(embedded, tmp_path):
+    workdir, hub = embedded
+    cache = tmp_path / "cache"
+    run_score(workdir, FakeEncoder(), hub, cache=cache)
+    other = FakeEncoder()
+    other.bias = 0.0
+    shifted = run_score(workdir, other, hub, cache=cache)
+    assert len({p.parent for p in cache.rglob("*.parquet")}) == 2
+    assert (
+        shifted["score_landscape"].to_pylist()
+        != run_score(workdir, FakeEncoder(), hub)["score_landscape"].to_pylist()
+    )
+
+
+def test_parallel_scoring_gives_the_same_table(embedded):
+    workdir, hub = embedded
+    assert run_score(workdir, FakeEncoder(), hub, workers=4).equals(
+        run_score(workdir, FakeEncoder(), hub)
+    )
+
+
+def _no_download(path, root):
+    raise AssertionError(f"downloaded {path}")

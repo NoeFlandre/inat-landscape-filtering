@@ -18,4 +18,5 @@ nav:
       - adr/0009-grid5000-workers.md
       - adr/0010-images-in-parts.md
       - adr/0011-uniform-order.md
+      - adr/0012-score-cache.md
   - Technical debt: tech-debt.md

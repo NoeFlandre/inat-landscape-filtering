@@ -112,18 +112,27 @@ class EmbeddingStore:
         return own is None or other is None or own.overlaps(other)
 
     def stream(self) -> Iterator[tuple[list[int], np.ndarray]]:
-        """Yield the ids and float16 embeddings of each shard, one shard at a time.
+        """Yield the ids and float16 embeddings of each shard, one shard at a time."""
+        for path in self.shards():
+            yield self.read(path)
 
-        Local shards are read in place. A remote shard with no local copy is downloaded, read
-        and deleted, so the disk keeps one remote shard at most.
+    def shards(self) -> list[str]:
+        """Return the paths of all the shards, local and remote, each once and in order."""
+        local = {str(p.relative_to(self.root)) for p in self._shards()}
+        return sorted(local | set(self._remote_shards()))
+
+    def read(self, path: str) -> tuple[list[int], np.ndarray]:
+        """Return the ids and float16 embeddings of one shard.
+
+        A local shard is read in place. A remote shard with no local copy is downloaded into
+        its own staging folder, read and deleted: shards can be read in parallel threads.
         """
-        local = {str(p.relative_to(self.root)): p for p in self._shards()}
-        staging = self.root / ".stream"
-        for path in sorted(set(local) | set(self._remote_shards())):
-            table = read_table(local.get(path) or self.hub.download(path, staging))
-            shutil.rmtree(staging, ignore_errors=True)
-            rows = table["embedding"].combine_chunks().flatten().to_numpy()
-            yield table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
+        local = self.root / path
+        staging = self.root / ".stream" / hashlib.sha256(path.encode()).hexdigest()[:16]
+        table = read_table(local if local.exists() else self.hub.download(path, staging))
+        shutil.rmtree(staging, ignore_errors=True)
+        rows = table["embedding"].combine_chunks().flatten().to_numpy()
+        return table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
 
     def done_ids(self) -> set[int]:
         """Return the ids of all photos that have an embedding."""

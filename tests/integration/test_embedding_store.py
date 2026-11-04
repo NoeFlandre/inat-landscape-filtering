@@ -131,3 +131,19 @@ def test_a_second_snapshot_reads_only_the_new_shards(tmp_path, hub):
     hub.id_reads = 0
     assert EmbeddingStore(tmp_path / "t", DIR, hub).snapshot() == 2
     assert hub.id_reads == 1
+
+
+def test_shards_lists_local_and_remote_shards_once_in_order(tmp_path, hub):
+    remote = EmbeddingStore(tmp_path / "a", DIR, hub).add([1], np.ones((1, 2)))
+    local = EmbeddingStore(tmp_path / "b", DIR, OfflineHub()).add([2], np.ones((1, 2)))
+    store = EmbeddingStore(tmp_path / "b", DIR, hub)
+    assert store.shards() == sorted([f"{DIR}/{remote.name}", f"{DIR}/{local.name}"])
+
+
+def test_read_gives_a_remote_shard_and_keeps_no_copy(tmp_path, hub):
+    path = EmbeddingStore(tmp_path / "a", DIR, hub).add([4, 5], np.ones((2, 3)))
+    store = EmbeddingStore(tmp_path / "b", DIR, hub)
+    ids, embeddings = store.read(f"{DIR}/{path.name}")
+    assert ids == [4, 5]
+    assert embeddings.shape == (2, 3)
+    assert not list((tmp_path / "b").rglob("*.parquet"))

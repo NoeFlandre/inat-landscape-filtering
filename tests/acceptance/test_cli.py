@@ -62,6 +62,9 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert _run(deps, tmp_path, "embed", "--snapshot") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--max-photos", "1000") == 0
     assert _run(deps, tmp_path, "score", "--thresholds", "0.1") == 0
+    cache = str(tmp_path / "cache")
+    assert _run(deps, tmp_path, "score", "--cache", cache, "--workers", "2") == 0
+    assert list((tmp_path / "cache").rglob("*.parquet"))
     assert _run(deps, tmp_path, "publish", "--thresholds", "0,0.99", "--cap-per-cell", "1") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--score", "score_contrast") == 0
     assert _run(deps, tmp_path, "publish", "--thresholds", "0", "--no-images") == 0

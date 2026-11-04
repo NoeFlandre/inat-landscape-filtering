@@ -257,6 +257,13 @@ def _add_score(sub: argparse._SubParsersAction) -> None:
         default=(0.0005, 0.001, 0.002, 0.005, 0.01),
         help="thresholds to count in the report, comma-separated",
     )
+    p.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="folder that keeps the scores of each shard; a later run reuses them",
+    )
+    p.add_argument("--workers", type=int, default=1, help="shards read and scored at the same time")
     p.set_defaults(handler=_score)
 
 
@@ -350,7 +357,11 @@ def _run_embed(args: argparse.Namespace, deps: Deps) -> None:
 
 def _score(args: argparse.Namespace, deps: Deps) -> None:
     table = run_score(
-        args.workdir, deps.encoder(args.model, 32), deps.hub(args.repo_id, args.offline)
+        args.workdir,
+        deps.encoder(args.model, 32),
+        deps.hub(args.repo_id, args.offline),
+        cache=args.cache,
+        workers=args.workers,
     )
     print(summarize(table[SCORE].to_pylist(), args.thresholds))
     quantiles = key_quantiles(table["score_contrast"].to_pylist())
