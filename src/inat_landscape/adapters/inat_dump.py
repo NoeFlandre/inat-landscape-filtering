@@ -24,6 +24,7 @@ from pyarrow import csv
 from inat_landscape.adapters.geo import h3_cells
 from inat_landscape.domain.cells import cap_first
 from inat_landscape.domain.licensing import ALLOWED_LICENSES
+from inat_landscape.domain.members import in_sorted
 
 SNAPSHOT_URL = (
     "https://inaturalist-open-data.s3.amazonaws.com/metadata/inaturalist-open-data-20261027.tar.gz"
@@ -361,24 +362,15 @@ def _id_in(ids: pa.Array, sorted_ids: NDArray[np.int64]) -> pa.Array:
     each batch of the dump.
     """
     values = pc.fill_null(ids, -1).to_numpy(zero_copy_only=False)
-    return pc.and_(pa.array(_sorted_in(values, sorted_ids)), pc.is_valid(ids))
+    return pc.and_(pa.array(in_sorted(values, sorted_ids)), pc.is_valid(ids))
 
 
 def _key_in(uuids: pa.Array, sorted_keys: NDArray[np.uint64]) -> pa.Array:
     valid = pc.fill_null(_valid_uuid(uuids), False).to_numpy(zero_copy_only=False)
     keys = uuid_keys(uuids.filter(pa.array(valid)))
     hit = np.zeros(len(uuids), dtype=bool)
-    hit[np.flatnonzero(valid)] = _sorted_in(keys, sorted_keys)
+    hit[np.flatnonzero(valid)] = in_sorted(keys, sorted_keys)
     return pa.array(hit)
-
-
-def _sorted_in(values: NDArray, sorted_values: NDArray) -> NDArray[np.bool_]:
-    """Tell which values are in `sorted_values`, by binary search (np.isin would sort the
-    tens of millions of selected values again for each batch)."""
-    if not len(sorted_values):
-        return np.zeros(len(values), dtype=bool)
-    at = np.minimum(np.searchsorted(sorted_values, values), len(sorted_values) - 1)
-    return sorted_values[at] == values
 
 
 def _valid_uuid(uuids: pa.Array) -> pa.Array:

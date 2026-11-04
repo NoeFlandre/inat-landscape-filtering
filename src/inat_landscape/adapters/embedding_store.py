@@ -22,6 +22,7 @@ import pyarrow.parquet as pq
 
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
+from inat_landscape.domain.members import in_sorted
 from inat_landscape.domain.sampling import Slots, in_slots
 
 _INDEX = "index"  # the done-ids snapshot; not a shard (the embeddings config reads *.parquet)
@@ -136,46 +137,46 @@ class EmbeddingStore:
         rows = table["embedding"].combine_chunks().flatten().to_numpy()
         return table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
 
-    def prune(self, keep: np.ndarray, *, workers: int = 1, batch: int = 50) -> tuple[int, int]:
-        """Remove from the remote shards the photos that are not in `keep`. Return the count of
-        shards rewritten and of rows removed.
+    def prune(self, keep: np.ndarray, *, workers: int = 1, batch: int = 50) -> list["Pruned"]:
+        """Remove from the remote shards the photos that are not in `keep`. Return the shards
+        that lost rows.
 
         A shard with rows to remove is replaced by a shard of its kept rows, with the same tag.
         Each commit replaces `batch` shards at most (the hub limits the commits per hour). The
         done-ids snapshot is deleted: it lists removed ids.
         """
         shards = self._remote_shards()
+        keep = np.sort(np.asarray(keep, np.int64))  # once: each shard then does a binary search
         batches = [shards[start : start + batch] for start in range(0, len(shards), batch)]
-        counts = np.array([self._prune_batch(b, keep, workers) for b in batches]).reshape(-1, 2)
-        return int(counts[:, 0].sum()), int(counts[:, 1].sum())
+        return [p for b in batches for p in self._prune_batch(b, keep, workers)]
 
-    def _prune_batch(self, chunk: list[str], keep: np.ndarray, workers: int) -> tuple[int, int]:
+    def _prune_batch(self, chunk: list[str], keep: np.ndarray, workers: int) -> list["Pruned"]:
         """Replace the shards of `chunk` that have rows to remove, in one commit."""
         with ThreadPoolExecutor(workers) as pool:
             changed = [p for p in pool.map(self._pruned, chunk, [keep] * len(chunk)) if p.removed]
         if changed:
             self._replace(changed)
-        return len(changed), sum(p.removed for p in changed)
+        return changed
 
-    def _replace(self, changed: list["_Pruned"]) -> None:
+    def _replace(self, changed: list["Pruned"]) -> None:
         new = [p.new for p in changed if p.new]
-        gone = [*(p.path for p in changed), self._snapshot_path]
-        self.hub.upload_folder(self.root, f"Prune {len(changed)} embedding shards", new, gone)
-        for name in new:
-            (self.root / name).unlink()
+        old = [p.path for p in changed]
+        message = f"Prune {len(changed)} embedding shards"
+        self.hub.upload_folder(self.root, message, new, [*old, self._snapshot_path])
+        _unlink(self.root, [*new, *old])  # a local copy of an old shard would come back
 
-    def _pruned(self, path: str, keep: np.ndarray) -> "_Pruned":
+    def _pruned(self, path: str, keep: np.ndarray) -> "Pruned":
         """Write the kept rows of a remote shard as a new local shard, if it has rows to
-        remove and rows to keep."""
+        remove and rows to keep. `keep` is sorted."""
         ids, embeddings = self.read(path)
-        mask = np.isin(np.asarray(ids, np.int64), keep)
+        mask = in_sorted(np.asarray(ids, np.int64), keep)
         removed = int((~mask).sum())
         if removed == 0 or removed == len(ids):
-            return _Pruned(path, "", removed)
+            return Pruned(path, "", removed)
         tag = path.rsplit("/", 1)[-1].removeprefix("part-").rpartition("-")[0]
         kept = np.asarray(ids, np.int64)[mask].tolist()
         new = _write_shard(self.root, self.remote_dir, tag, kept, embeddings[mask])
-        return _Pruned(path, str(new.relative_to(self.root)), removed)
+        return Pruned(path, str(new.relative_to(self.root)), removed)
 
     def done_ids(self) -> set[int]:
         """Return the ids of all photos that have an embedding."""
@@ -200,8 +201,13 @@ class EmbeddingStore:
         return sorted(self.local_dir.glob("part-*.parquet"))
 
 
+def _unlink(root: Path, names: list[str]) -> None:
+    for name in names:
+        (root / name).unlink(missing_ok=True)
+
+
 @dataclass(frozen=True)
-class _Pruned:
+class Pruned:
     """One remote shard after the prune: the rows it lost, and its new shard ("" if none)."""
 
     path: str

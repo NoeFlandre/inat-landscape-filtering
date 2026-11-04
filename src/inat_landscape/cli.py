@@ -259,6 +259,12 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
         "--workers", type=int, default=8, help="shards that --prune reads at the same time"
     )
     p.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="score cache of `score --cache`: --prune gives the cached scores to the new shards",
+    )
+    p.add_argument(
         "--compile",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -362,7 +368,9 @@ def _embed(args: argparse.Namespace, deps: Deps) -> None:
 def _embed_tool(args: argparse.Namespace, hub: Hub) -> str:
     """Run one of the embed tools that load no model, and return its report line."""
     if args.prune:
-        shards, rows = prune_embeddings(args.workdir, args.model, hub, workers=args.workers)
+        shards, rows = prune_embeddings(
+            args.workdir, args.model, hub, workers=args.workers, cache=args.cache
+        )
         return f"pruned_shards={shards} pruned_rows={rows}"
     if args.snapshot:
         return f"snapshot={open_store(args.workdir, args.model, hub).snapshot()}"

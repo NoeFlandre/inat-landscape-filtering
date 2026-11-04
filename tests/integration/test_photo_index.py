@@ -15,7 +15,6 @@ from inat_landscape.adapters.inat_dump import (
     DumpError,
     Selection,
     _id_in,
-    _sorted_in,
     index_photos,
     read_dump,
     scan_taxa,
@@ -146,16 +145,6 @@ def test_id_lookup_matches_is_in(ids, selected):
     expected = pc.fill_null(pc.is_in(column, pa.array(selected, pa.int64())), False)
     got = _id_in(column, np.unique(np.array(selected, dtype=np.int64)))
     assert pc.fill_null(got, False).to_pylist() == expected.to_pylist()
-
-
-@given(
-    st.lists(st.integers(0, 2**64 - 1), max_size=30),
-    st.lists(st.integers(0, 2**64 - 1), max_size=30),
-)
-def test_sorted_lookup_matches_isin(values, selected):
-    values_a = np.array(values, dtype=np.uint64)
-    selected_a = np.unique(np.array(selected, dtype=np.uint64))
-    assert _sorted_in(values_a, selected_a).tolist() == np.isin(values_a, selected_a).tolist()
 
 
 def test_uuid_keys_accept_large_strings():

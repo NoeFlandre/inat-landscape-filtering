@@ -10,6 +10,7 @@ import pyarrow as pa
 from inat_landscape.adapters.embedding_store import EmbeddingStore
 from inat_landscape.adapters.files import read_rows, read_table, write_json, write_table
 from inat_landscape.adapters.hub import Hub
+from inat_landscape.domain.members import in_sorted
 from inat_landscape.domain.scoring import (
     CLOSEUP_PROMPTS,
     LANDSCAPE_PROMPTS,
@@ -49,7 +50,7 @@ def run_score(
         raise StageError("no embeddings: run `embed` first")
     counts = {"embedding_rows": rows, "embedding_photos": len(ids), "embedding_dim": dim}
     write_json(counts, workdir / EMBEDDINGS)
-    keep = np.isin(ids, sample_ids)
+    keep = in_sorted(ids, np.sort(sample_ids))
     ids, scores = ids[keep], {name: column[keep] for name, column in scores.items()}
     table = read_rows(workdir / SAMPLE, "photo_id", ids.tolist())
     sorter = np.argsort(ids)

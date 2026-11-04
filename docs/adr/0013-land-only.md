@@ -16,4 +16,5 @@ The map of the card showed H3 cells at sea: observations of marine life, from bo
 
 - A cell that touches land keeps all its photos, also the photos on the water near the coast. The card states it.
 - A photo is not tested alone: the coast of Natural Earth 1:10m is not precise enough for a photo on a beach.
-- The score cache (ADR 0012) does not know the new shards: the next `score` reads them again.
+- `embed --prune --cache FOLDER` gives the cached scores of each pruned shard (ADR 0012) to its new shard. Thus the next `score` does not download the shards again.
+- The prune sorts the kept ids once and finds the rows of each shard by binary search (`domain/members.py`). `np.isin` sorted the 73 million kept ids again for each shard: one shard took minutes, and 16 threads used 56 GB of memory.

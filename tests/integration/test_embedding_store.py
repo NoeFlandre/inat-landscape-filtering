@@ -156,7 +156,10 @@ def test_prune_rewrites_only_the_shards_with_removed_rows(tmp_path, hub):
     gone = EmbeddingStore(tmp_path / "a", DIR, hub).add([5], np.array([[5.0]]))
     first.snapshot()
     store = EmbeddingStore(tmp_path / "b", DIR, hub)
-    assert store.prune(np.array([1, 3, 4]), workers=2, batch=2) == (2, 2)
+    pruned = store.prune(np.array([4, 3, 1]), workers=2, batch=2)
+    assert sorted((p.path, p.removed, bool(p.new)) for p in pruned) == sorted(
+        [(f"{DIR}/{mixed.name}", 1, True), (f"{DIR}/{gone.name}", 1, False)]
+    )
     names = hub.list_files(DIR + "/")
     assert f"{DIR}/{kept.name}" in names
     assert f"{DIR}/{mixed.name}" not in names
@@ -172,5 +175,13 @@ def test_prune_rewrites_only_the_shards_with_removed_rows(tmp_path, hub):
 def test_prune_with_nothing_to_remove_makes_no_commit(tmp_path, hub):
     EmbeddingStore(tmp_path / "a", DIR, hub).add([1], np.ones((1, 2)))
     commits = len(hub.folder_uploads)
-    assert EmbeddingStore(tmp_path / "b", DIR, hub).prune(np.array([1])) == (0, 0)
+    assert EmbeddingStore(tmp_path / "b", DIR, hub).prune(np.array([1])) == []
     assert len(hub.folder_uploads) == commits
+
+
+def test_prune_deletes_the_local_copy_of_a_pruned_shard(tmp_path, hub):
+    store = EmbeddingStore(tmp_path, DIR, hub)
+    old = store.add([1, 2], np.ones((2, 2)))
+    [pruned] = store.prune(np.array([1]))
+    assert not old.exists()
+    assert store.shards() == [pruned.new]

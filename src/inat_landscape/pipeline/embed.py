@@ -25,6 +25,7 @@ from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.land import LAND, on_land
 from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
+from inat_landscape.pipeline.score_cache import carry_scores
 
 _LOG = logging.getLogger(__name__)
 HUB_DIR = "hub"
@@ -140,12 +141,16 @@ def _work(workdir: Path, model_id: str, hub: Hub, worker: Slots) -> _Work:
 
 
 def prune_embeddings(
-    workdir: Path, model_id: str, hub: Hub, *, workers: int = 1
+    workdir: Path, model_id: str, hub: Hub, *, workers: int = 1, cache: Path | None = None
 ) -> tuple[int, int]:
     """Remove from the hub shards the photos that are not in the sample (after the land
-    stage: the photos at sea). Return the count of shards rewritten and of rows removed."""
-    keep = read_sample(workdir, ["photo_id"])["photo_id"].to_numpy()
-    return open_store(workdir, model_id, hub).prune(keep, workers=workers)
+    stage: the photos at sea). The cached scores of a pruned shard go to its new shard
+    (ADR 0012). Return the count of shards rewritten and of rows removed."""
+    keep = np.sort(read_sample(workdir, ["photo_id"])["photo_id"].to_numpy())
+    pruned = open_store(workdir, model_id, hub).prune(keep, workers=workers)
+    if cache is not None:
+        carry_scores(cache, pruned, keep)
+    return len(pruned), sum(p.removed for p in pruned)
 
 
 def plan_embed(workdir: Path, model_id: str, hub: Hub, *, worker: Slots = ONE_WORKER) -> int:

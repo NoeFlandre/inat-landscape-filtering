@@ -9,6 +9,7 @@ import pyarrow as pa
 
 from inat_landscape.adapters.files import read_json, read_table, write_json, write_table
 from inat_landscape.adapters.land import LAND_SOURCES, fetch_land, land_cells
+from inat_landscape.domain.members import in_sorted
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import MANIFEST
 from inat_landscape.pipeline.sample import SAMPLE
@@ -47,4 +48,5 @@ def on_land(workdir: Path, cells: np.ndarray) -> np.ndarray | None:
     """Return which of `cells` touch land, or None when the land stage did not run."""
     if not (workdir / LAND).exists():
         return None
-    return np.isin(cells, read_table(workdir / LAND)["h3_cell"].to_numpy())
+    land = np.sort(read_table(workdir / LAND)["h3_cell"].to_numpy())
+    return in_sorted(np.asarray(cells, land.dtype), land)

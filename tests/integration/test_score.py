@@ -4,12 +4,14 @@ import json
 import shutil
 
 import numpy as np
+import pyarrow.compute as pc
 import pytest
 
 from inat_landscape.adapters.images import fetch
 from inat_landscape.domain.scoring import LANDSCAPE_PROMPTS
-from inat_landscape.pipeline.embed import HUB_DIR, open_store, run_embed
+from inat_landscape.pipeline.embed import HUB_DIR, open_store, prune_embeddings, run_embed
 from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.land import run_land
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORED, run_score
 from tests.fakes import FakeEncoder, FakeHub
 from tests.integration.pipeline_helpers import prepared, serve_photos
@@ -121,3 +123,19 @@ def test_parallel_scoring_gives_the_same_table(embedded):
 
 def _no_download(path, root):
     raise AssertionError(f"downloaded {path}")
+
+
+def test_prune_gives_the_cached_scores_to_the_new_shards(embedded, tmp_path, monkeypatch):
+    workdir, hub = embedded
+    cache = tmp_path / "cache"
+    before = run_score(workdir, FakeEncoder(), hub, cache=cache)
+    square = [[3.0, 45.3], [3.5, 45.3], [3.5, 45.7], [3.0, 45.7], [3.0, 45.3]]
+    run_land(workdir, lambda: [{"type": "Polygon", "coordinates": [square]}])
+    assert prune_embeddings(workdir, FakeEncoder.model_id, hub, cache=cache) == (1, 1)
+    monkeypatch.setattr(hub, "download", _no_download)
+    shutil.rmtree(workdir / HUB_DIR)
+    after = run_score(workdir, FakeEncoder(), hub, cache=cache)
+    assert after["photo_id"].to_pylist() == [101, 102]
+    old = before.filter(pc.is_in(before["photo_id"], after["photo_id"])).sort_by("photo_id")
+    assert after.sort_by("photo_id").equals(old)
+    assert len(list(cache.rglob("*.parquet"))) == 1
