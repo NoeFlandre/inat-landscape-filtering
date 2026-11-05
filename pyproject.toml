@@ -1,6 +1,6 @@
 [project]
 name = "inat-landscape"
-version = "0.1.0"
+version = "1.0.0"
 description = "Filter iNaturalist photos to keep landscape views, with zero-shot SigLIP2 scores."
 readme = "README.md"
 license = "MIT"

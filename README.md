@@ -4,6 +4,17 @@ Find iNaturalist photos that show a landscape. Keep their geolocation. Use them 
 
 - Dataset: [NoeFlandre/inat-landscape-filtering](https://huggingface.co/datasets/NoeFlandre/inat-landscape-filtering)
 - Documentation: `docs/` (build with `uv run mkdocs serve`)
+- Releases: see `CHANGELOG.md`. To get the stable code and data:
+
+```bash
+git checkout v1.0.0
+```
+
+```python
+from datasets import load_dataset
+
+ds = load_dataset("NoeFlandre/inat-landscape-filtering", "all", revision="v1.0.0")
+```
 
 ## Quick start
 
