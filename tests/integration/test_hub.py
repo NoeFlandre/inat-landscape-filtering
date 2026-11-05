@@ -86,12 +86,6 @@ def test_offline_hub_has_no_remote(tmp_path):
         hub.download("x", tmp_path)
 
 
-def test_private_hub_creates_a_private_repo(tmp_path):
-    api = FakeApi()
-    HfHub("u/state", api=cast("HfApi", api), private=True).upload_file(tmp_path, "x", "m")
-    assert api.calls[0] == ("create", "u/state", "dataset", True, True)
-
-
 def test_delete_folder_ignores_a_missing_folder():
     api = FakeApi()
     hub = _hub(api)

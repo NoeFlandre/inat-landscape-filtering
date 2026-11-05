@@ -29,7 +29,7 @@ from inat_landscape.domain.layers import complete_cap
 from inat_landscape.domain.scoring import CLOSEUP_PROMPTS, LANDSCAPE_PROMPTS, NEGATIVE_PROMPTS
 from inat_landscape.domain.stats import key_quantiles
 from inat_landscape.domain.thresholds import config_name
-from inat_landscape.pipeline.diversity import read_diversity
+from inat_landscape.pipeline.diversity import COMPONENTS, read_diversity
 from inat_landscape.pipeline.embed import (
     HUB_DIR,
     SCORING_SIZE,
@@ -37,8 +37,8 @@ from inat_landscape.pipeline.embed import (
     photo_url,
     read_sample,
 )
-from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ingest import MANIFEST
+from inat_landscape.pipeline.errors import StageError, require
+from inat_landscape.pipeline.ingest import DEFAULT_RES, MANIFEST, ingest_params
 from inat_landscape.pipeline.land import LAND, LAND_GRID, LAND_REPORT
 from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
@@ -48,6 +48,9 @@ PART = "part-00000.parquet"
 LAYER_TOLERANCE = 0.002  # share of failed downloads that a complete layer can miss
 EXAMPLES_PER_BAND = 6  # photos in each row of the card mosaic
 STAGING = Path("publish-parts")  # one image part at a time, deleted after its upload
+DIVERSITY_MAPS = ("assets/diversity.png", "assets/look.png", "assets/look-detail.png")
+DETAIL_HEXAGON = 0.25  # degrees: a few H3 cells of resolution 5 per hexagon, not 100 or more
+DETAIL_DPI = 400
 
 
 @dataclass(frozen=True)
@@ -113,11 +116,6 @@ def run_publish(
     return PublishReport(table.num_rows, subsets, int((kept[0] & ~has_image).sum()))
 
 
-DIVERSITY_MAPS = ("assets/diversity.png", "assets/look.png", "assets/look-detail.png")
-DETAIL_HEXAGON = 0.25  # degrees: a few H3 cells of resolution 5 per hexagon, not 100 or more
-DETAIL_DPI = 400
-
-
 def run_maps(workdir: Path, hub: Hub) -> list[str]:
     """Draw the maps again and upload them alone: the card does not change.
 
@@ -126,16 +124,17 @@ def run_maps(workdir: Path, hub: Hub) -> list[str]:
     """
     if read_diversity(workdir) is None:
         raise StageError(f"no diversity at {workdir}: run `diversity` first")
-    root, params = workdir / HUB_DIR, _params(workdir)
-    folder, land = root / "assets", _land_points(workdir)
+    root, params = workdir / HUB_DIR, ingest_params(workdir)
+    res = params.get("res", DEFAULT_RES)
+    folder, land = root / "assets", _land_points(workdir, res)
     maps = list(DIVERSITY_MAPS)
     published = root / "data" / "all"
     if published.exists():
         columns = ["h3_cell", "longitude", "latitude"]
         cap = params.get("cap", PublishSpec.cap_per_cell)
-        _world_map(folder, read_table(published, columns), cap, params.get("res", 5), land)
+        _world_map(folder, read_table(published, columns), cap, res, land)
         maps.insert(0, "assets/map.png")
-    _diversity_maps(folder, workdir, params.get("res", 5), land)
+    _diversity_maps(folder, workdir, res, land)
     hub.upload_folder(root, "Update the maps", allow=maps, delete=[])
     return maps
 
@@ -146,8 +145,7 @@ def _write_all(workdir: Path) -> tuple[pa.Table, int | None]:
     With a uniform sample (ADR 0011), only the complete layers are published: the photos of
     rank below the cap that every cell has reached. Return the table and that cap.
     """
-    if not (workdir / SCORED).exists():
-        raise StageError(f"no scores at {workdir / SCORED}: run `score` first")
+    require(workdir / SCORED, "scores", "score")
     table, layer_cap = _complete_layers(workdir, read_table(workdir / SCORED))
     table = _with_urls(table)
     root = workdir / HUB_DIR
@@ -231,7 +229,7 @@ def _card_info(
     repo_id: str,
 ) -> CardInfo:
     stored = read_json(workdir / MANIFEST) or {}
-    params = _params(workdir)
+    params = stored.get("params", {})
     embeddings = read_json(workdir / EMBEDDINGS) or {}
     kept = [m.tolist() for _, m in published]
     return CardInfo(
@@ -281,11 +279,6 @@ def _sea(workdir: Path) -> dict:
     return {"sea_photos": land["sea_photos"], "sea_cells": land["sea_cells"]}
 
 
-def _params(workdir: Path) -> dict:
-    """Return the ingest parameters of the run (source, fraction, res, cap)."""
-    return (read_json(workdir / MANIFEST) or {}).get("params", {})
-
-
 def _years(table: pa.Table) -> tuple[str, str]:
     """Return the first and last observation years."""
     dates = pc.drop_null(table["observed_on"])
@@ -293,9 +286,10 @@ def _years(table: pa.Table) -> tuple[str, str]:
 
 
 def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) -> None:
-    params, land = _params(workdir), _land_points(workdir)
+    params = ingest_params(workdir)
     figures.pipeline(folder / "hero.png", with_images=spec.images, land=(workdir / LAND).exists())
-    cap, res = params.get("cap", spec.cap_per_cell), params.get("res", 5)
+    cap, res = params.get("cap", spec.cap_per_cell), params.get("res", DEFAULT_RES)
+    land = _land_points(workdir, res)
     _world_map(folder, table, cap, res, land)
     _diversity_maps(folder, workdir, res, land)
     figures.score_histogram(
@@ -322,13 +316,12 @@ def _world_map(
     figures.world_map(folder / "map.png", cells, cap=cap, res=res, land=land)
 
 
-def _land_points(workdir: Path) -> figures.Points | None:
+def _land_points(workdir: Path, res: int) -> figures.Points | None:
     """Return the centres of the children of all the land cells (finer than the cells, so
     that the small hexagons of the detailed map have points), if the land stage ran."""
     if not (workdir / LAND_GRID).exists():
         return None
     cells = read_table(workdir / LAND_GRID)["h3_cell"].to_numpy()
-    res = _params(workdir).get("res", 5)
     lat, lon = cell_centers(children(cells, res + 1))
     return lon, lat
 
@@ -346,7 +339,7 @@ def _diversity_maps(folder: Path, workdir: Path, res: int, land: figures.Points 
     figures.diversity_map(
         folder / "diversity.png", (lon, lat, values), per_cell=per_cell, res=res, land=land
     )
-    pcs = np.stack([table[f"pc{i}"].to_numpy() for i in (1, 2, 3)], axis=1)
+    pcs = np.stack([table[f"pc{i}"].to_numpy() for i in range(1, COMPONENTS + 1)], axis=1)
     rgb = to_unit_range(pcs)
     figures.look_map(folder / "look.png", lon, lat, rgb, land=land)
     detail = folder / "look-detail.png"
@@ -373,31 +366,36 @@ def _present(ids: list[int], images: dict[int, Image.Image]) -> list[Image.Image
 def _example_images(table: pa.Table, ids: list[int], fetcher: Fetcher) -> dict[int, Image.Image]:
     """Download and decode the 240 px photos of `ids`. A photo that fails is left out."""
     chosen = table.filter(pc.is_in(table["photo_id"], pa.array(ids, pa.int64())))
-    urls = _small_urls(chosen["photo_id"].to_pylist(), chosen["extension"].to_pylist())
+    urls = _small_urls(chosen)
     decoded = {f.photo_id: decode(f.data or b"") for f in fetcher(urls)}
     return {i: image for i, image in decoded.items() if image is not None}
 
 
-def _small_urls(ids: list[int], extensions: list[str]) -> dict[int, str]:
-    return {i: photo_url(i, SCORING_SIZE, e) for i, e in zip(ids, extensions, strict=True)}
+def _small_urls(rows: pa.Table) -> dict[int, str]:
+    return {i: photo_url(i, SCORING_SIZE, e) for i, e in _id_extensions(rows)}
+
+
+def _id_extensions(rows: pa.Table) -> list[tuple[int, str]]:
+    """Return the photo id and the file extension of each row."""
+    return list(zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True))
 
 
 def _with_urls(table: pa.Table) -> pa.Table:
-    rows = zip(table["photo_id"].to_pylist(), table["extension"].to_pylist(), strict=True)
-    pairs = [(photo_url(i, SCORING_SIZE, e), photo_url(i, IMAGE_SIZE, e)) for i, e in rows]
+    pairs = [
+        (photo_url(i, SCORING_SIZE, e), photo_url(i, IMAGE_SIZE, e))
+        for i, e in _id_extensions(table)
+    ]
     table = table.append_column("url_small", pa.array([p[0] for p in pairs], pa.string()))
     return table.append_column("url_medium", pa.array([p[1] for p in pairs], pa.string()))
 
 
 def _medium_images(rows: pa.Table, fetcher: Fetcher) -> dict[int, bytes]:
     """Download the medium image of each row; failed downloads are left out."""
-    pairs = zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True)
-    results = fetcher({i: photo_url(i, IMAGE_SIZE, e) for i, e in pairs})
+    results = fetcher({i: photo_url(i, IMAGE_SIZE, e) for i, e in _id_extensions(rows)})
     return {r.photo_id: r.data for r in results if r.data is not None}
 
 
 def _with_images(rows: pa.Table, images: dict[int, bytes]) -> pa.Table:
-    pairs = zip(rows["photo_id"].to_pylist(), rows["extension"].to_pylist(), strict=True)
-    names = [(i, f"{i}.{e}") for i, e in pairs]
+    names = [(i, f"{i}.{e}") for i, e in _id_extensions(rows)]
     column = image_column([images[i] for i, _ in names], [n for _, n in names])
     return rows.append_column("image", column)

@@ -1,7 +1,5 @@
 """Score thresholds and the dataset configs they define."""
 
-from collections.abc import Sequence
-
 _PREFIXES = {"score_landscape": "score_ge_", "score_contrast": "contrast_ge_"}
 
 
@@ -13,11 +11,6 @@ def config_name(threshold: float, score: str = "score_landscape") -> str:
     if float(text) != threshold:
         text = repr(threshold)
     return _PREFIXES[score] + text.replace(".", "_")
-
-
-def keep(scores: Sequence[float], threshold: float) -> list[bool]:
-    """Tell which scores reach the threshold (inclusive)."""
-    return [s >= threshold for s in scores]
 
 
 def parse_thresholds(raw: str) -> tuple[float, ...]:

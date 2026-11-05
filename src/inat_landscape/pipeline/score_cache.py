@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from inat_landscape.adapters.embedding_store import Pruned
+from inat_landscape.adapters.embedding_store import Pruned, shard_name
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.domain.members import in_sorted
 
@@ -20,13 +20,13 @@ def carry_scores(cache: Path, pruned: list[Pruned], keep: np.ndarray) -> int:
 def _carry(folder: Path, pruned: list[Pruned], keep: np.ndarray) -> int:
     carried = 0
     for p in pruned:
-        old = folder / p.path.rsplit("/", 1)[-1]
+        old = folder / shard_name(p.path)
         if not old.exists():
             continue
         if p.new:
             table = read_table(old)
             kept = table.filter(pa.array(in_sorted(table["photo_id"].to_numpy(), keep)))
-            write_table(kept, folder / p.new.rsplit("/", 1)[-1])
+            write_table(kept, folder / shard_name(p.new))
             carried += 1
         old.unlink()
     return carried

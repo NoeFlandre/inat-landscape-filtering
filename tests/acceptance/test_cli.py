@@ -66,6 +66,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
         == 0
     )
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--plan") == 0
+    assert _run(deps, tmp_path, "embed", "--plan") == 0  # the default worker: all the slots
     assert _run(deps, tmp_path, "embed", "--snapshot") == 0
     assert _run(deps, tmp_path, "embed", "--worker", "0/2", "--max-photos", "1000") == 0
     assert _run(deps, tmp_path, "land") == 0

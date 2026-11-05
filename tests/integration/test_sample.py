@@ -5,14 +5,9 @@ import io
 import pytest
 
 from inat_landscape.adapters.files import read_table
+from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import IngestParams, run_ingest
-from inat_landscape.pipeline.sample import (
-    SAMPLE,
-    SAMPLE_IDS,
-    StageError,
-    run_sample,
-    run_worklist,
-)
+from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS, run_sample, run_worklist
 from tests import fakes
 
 

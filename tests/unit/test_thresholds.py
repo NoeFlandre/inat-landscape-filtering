@@ -1,13 +1,8 @@
-"""Threshold configs: names and nested subsets."""
+"""Threshold configs: names and the parsing of a threshold list."""
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
-from inat_landscape.domain.thresholds import config_name, keep, parse_thresholds
-
-scores = st.lists(st.floats(0, 1, allow_nan=False), max_size=30)
-thresholds = st.floats(0, 1, allow_nan=False)
+from inat_landscape.domain.thresholds import config_name, parse_thresholds
 
 
 @pytest.mark.parametrize(
@@ -21,18 +16,6 @@ thresholds = st.floats(0, 1, allow_nan=False)
 )
 def test_config_name(t, name):
     assert config_name(t) == name
-
-
-@given(scores, thresholds, thresholds)
-def test_higher_threshold_keeps_subset(s, a, b):
-    low, high = sorted((a, b))
-    kept_high = {i for i, k in enumerate(keep(s, high)) if k}
-    kept_low = {i for i, k in enumerate(keep(s, low)) if k}
-    assert kept_high <= kept_low
-
-
-def test_keep_is_inclusive():
-    assert keep([0.29, 0.3, 0.31], 0.3) == [False, True, True]
 
 
 def test_parse_thresholds_sorts_and_dedups():

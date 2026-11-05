@@ -9,15 +9,13 @@ import pyarrow.compute as pc
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.inat_dump import open_source, uuid_keys
 from inat_landscape.domain.sampling import uniform_order
-from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.errors import StageError, require
 from inat_landscape.pipeline.ingest import CANDIDATES, IngestParams, Opener, run_index
 
 SAMPLE = "sample.parquet"
 SAMPLE_IDS = "sample-ids.parquet"  # photo_id and extension only: all that the embed jobs read
 
 _IDS_SCHEMA = pa.schema([("photo_id", pa.int64()), ("extension", pa.string())])
-
-__all__ = ["SAMPLE", "SAMPLE_IDS", "StageError", "run_sample"]
 
 
 def run_sample(workdir: Path, n: int | None) -> pa.Table:
@@ -27,12 +25,10 @@ def run_sample(workdir: Path, n: int | None) -> pa.Table:
     embed stage works in this order, so a stop at any time leaves about the same count of
     photos in each cell. `cell_rank` is the place of a photo in its cell.
     """
-    path = workdir / CANDIDATES
-    if not path.exists():
-        raise StageError(f"no candidates at {path}: run `ingest` first")
+    require(workdir / CANDIDATES, "candidates", "ingest")
     if n is not None and n < 0:
         raise StageError(f"n must be >= 0, got {n}")
-    table = read_table(path)
+    table = read_table(workdir / CANDIDATES)
     ids, ranks = uniform_order(*_columns(table))
     ids, ranks = ids[:n], ranks[:n]
     sample = table.filter(pc.is_in(table["photo_id"], pa.array(ids)))
@@ -49,8 +45,13 @@ def run_sample(workdir: Path, n: int | None) -> pa.Table:
 def _columns(table: pa.Table) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     keys = uuid_keys(table["observation_uuid"])  # vectorized `uuid_key`
     positions = pc.fill_null(table["position"], 0).to_numpy()  # missing position sorts first
-    cells = pc.dictionary_encode(table["h3_cell"]).combine_chunks().indices.to_numpy()
-    return keys, positions.astype(np.int64), table["photo_id"].to_numpy(), cells.astype(np.int64)
+    return keys, positions.astype(np.int64), table["photo_id"].to_numpy(), _cell_codes(table)
+
+
+def _cell_codes(table: pa.Table) -> np.ndarray:
+    """Return a dense integer code for the H3 cell of each row."""
+    codes = pc.dictionary_encode(table["h3_cell"]).combine_chunks().indices
+    return codes.to_numpy().astype(np.int64)
 
 
 def run_worklist(workdir: Path, params: IngestParams, *, opener: Opener = open_source) -> pa.Table:
@@ -61,12 +62,11 @@ def run_worklist(workdir: Path, params: IngestParams, *, opener: Opener = open_s
     """
     index = run_index(workdir, params, opener=opener)
     selected = index.selected
-    cells = pc.dictionary_encode(selected["h3_cell"]).combine_chunks().indices.to_numpy()
     ids, _ = uniform_order(
         selected["observation_key"].to_numpy(),
         selected["position"].to_numpy().astype(np.int64),
         selected["photo_id"].to_numpy(),
-        cells.astype(np.int64),
+        _cell_codes(selected),
     )
     order = pa.table({"photo_id": ids, "_place": np.arange(len(ids))})
     table = selected.select(["photo_id", "extension"]).join(order, "photo_id")

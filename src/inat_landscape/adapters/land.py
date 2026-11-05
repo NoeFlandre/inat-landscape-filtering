@@ -13,11 +13,14 @@ LAND_SOURCES = tuple(
 )
 
 
+_HTTP_TIMEOUT = 120  # seconds: the land file is about 10 MB
+
+
 def fetch_land(urls: Iterable[str] = LAND_SOURCES) -> list[dict]:
     """Download the land GeoJSON files and return their geometries."""
     geometries = []
     for url in urls:
-        response = httpx.get(url, follow_redirects=True, timeout=120)
+        response = httpx.get(url, follow_redirects=True, timeout=_HTTP_TIMEOUT)
         response.raise_for_status()
         geometries.extend(f["geometry"] for f in response.json()["features"])
     return geometries

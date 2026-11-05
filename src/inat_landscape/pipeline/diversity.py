@@ -30,6 +30,7 @@ from inat_landscape.pipeline.errors import StageError
 DIVERSITY = "diversity.parquet"
 PER_CELL = 50  # photos of each cell: the same count in each cell, so cells compare
 MIN_PHOTOS = 20  # a cell with fewer embedded photos has no value
+COMPONENTS = 3  # principal components: the red, green and blue of the colour maps
 
 
 def run_diversity(
@@ -93,13 +94,13 @@ def _write(workdir: Path, sums: _Sums, min_photos: int, per_cell: int) -> pa.Tab
     if sums.sums is None or not keep.any():
         raise StageError(f"no cell has {need} embedded photos: run `embed` first")
     total, counts = sums.sums[keep], sums.counts[keep]
-    pcs = principal_components(total / counts[:, None], k=3)
+    pcs = principal_components(total / counts[:, None], k=COMPONENTS)
     table = pa.table(
         {
             "h3_cell": pa.array(sums.cells[keep]),
             "photos": pa.array(counts),
             "diversity": pa.array(mean_pairwise_distance(total, counts)),
-            **{f"pc{i + 1}": pa.array(pcs[:, i]) for i in range(3)},
+            **{f"pc{i + 1}": pa.array(pcs[:, i]) for i in range(COMPONENTS)},
         }
     ).replace_schema_metadata(
         {b"per_cell": str(per_cell).encode(), b"min_photos": str(need).encode()}

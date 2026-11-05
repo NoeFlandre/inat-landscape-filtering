@@ -34,10 +34,16 @@ SELECTED = "ingest/selected.parquet"
 COUNTS = "ingest/cell_counts.parquet"
 CANDIDATES = "ingest/candidates.parquet"
 MANIFEST = "ingest/manifest.json"
+DEFAULT_RES = 5  # H3 resolution of a run whose manifest has none (also the CLI default)
 _TAXA_MANIFEST = "ingest/taxa.json"
 _INDEX_MANIFEST = "ingest/index.json"
 
 Opener = Callable[[str], BinaryIO]
+
+
+def ingest_params(workdir: Path) -> dict:
+    """Return the ingest parameters of the run (source, fraction, res, cap), or {}."""
+    return (read_json(workdir / MANIFEST) or {}).get("params", {})
 
 
 @dataclass(frozen=True)

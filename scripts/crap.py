@@ -1,4 +1,4 @@
-"""Fail when a function has a CRAP score above the limit.
+"""Fail when a function has a CRAP score at or above the limit.
 
 CRAP(f) = cc(f)^2 * (1 - cov(f))^3 + cc(f), with cc the cyclomatic complexity (radon)
 and cov the line coverage of the function (coverage.py JSON report, `functions` section).

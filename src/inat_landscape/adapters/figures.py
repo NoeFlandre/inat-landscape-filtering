@@ -33,6 +33,18 @@ CHIP = {
     "sand": ("#f1e6d8", "#c7ae8f"),
 }
 
+_Axis = Sequence[float] | np.ndarray
+Points = tuple[_Axis, _Axis]  # longitudes, latitudes
+CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
+CellValues = tuple[np.ndarray, np.ndarray, np.ndarray]  # lon, lat, one value per cell
+_MAX_LINEAR_BINS = 12
+_EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
+_MAP_SIZE = (16, 8.6)
+_HEXAGON = 2.0  # degrees: the hexagons of the maps
+_CHIP_FONT = 12
+_MIN_FONT = 6  # a chip label does not get smaller than this
+Box = tuple[float, float, float, float]  # x, y, width, height
+
 mpl.rcParams.update(
     {
         "font.family": ["Inter", "DejaVu Sans"],
@@ -138,18 +150,6 @@ def _dataset(ax: plt.Axes, *, with_images: bool) -> None:
     ax.text(140, 10, "geolocated\nphotos", va="center", fontsize=12, fontweight="bold", color=INK)
 
 
-_Axis = Sequence[float] | np.ndarray
-Points = tuple[_Axis, _Axis]  # longitudes, latitudes
-CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
-CellValues = tuple[np.ndarray, np.ndarray, np.ndarray]  # lon, lat, one value per cell
-_MAX_LINEAR_BINS = 12
-_EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
-_MAP_SIZE = (16, 8.6)
-_CHIP_FONT = 12
-_MIN_FONT = 6  # a chip label does not get smaller than this
-Box = tuple[float, float, float, float]  # x, y, width, height
-
-
 def _panel(ax: plt.Axes, box: Box, tone: str) -> None:
     x, y, w, h = box
     face, edge = PANEL[tone]
@@ -199,7 +199,7 @@ def world_map(
 ) -> None:
     """Draw how full the H3 cells are against the cap (mean per 2° hexagon)."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _land(ax, land, 2.0)
+    _land(ax, land, _HEXAGON)
     bounds = _cap_bounds(cap)
     lon, lat, count = cells
     filled = _hexbin(ax, (lon, lat), count, _palette(BLUES, len(bounds) - 1), _norm(bounds))
@@ -215,7 +215,7 @@ def diversity_map(
 ) -> None:
     """Draw the visual diversity of each H3 cell (mean per 2° hexagon), in 10 quantile bins."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _land(ax, land, 2.0)
+    _land(ax, land, _HEXAGON)
     lon, lat, values = cells
     bounds = _quantile_bounds(np.asarray(values, float), 10)
     filled = _hexbin(ax, (lon, lat), values, _palette(GREENS, len(bounds) - 1), _norm(bounds))
@@ -236,7 +236,7 @@ def look_map(  # noqa: PLR0913 - the points, their colours and how to draw them
     rgb: np.ndarray,
     *,
     land: Points | None = None,
-    size: float = 2.0,
+    size: float = _HEXAGON,
     dpi: int = 150,
 ) -> None:
     """Draw the colour of each H3 cell (mean per `size`° hexagon; 2° as in the other maps):
@@ -344,7 +344,7 @@ def _hexbin(
     cmap: ListedColormap,
     norm: BoundaryNorm | None = None,
     *,
-    size: float = 2.0,
+    size: float = _HEXAGON,
 ):
     """Draw the mean of `values` in each `size`° hexagon that has a point."""
     return ax.hexbin(

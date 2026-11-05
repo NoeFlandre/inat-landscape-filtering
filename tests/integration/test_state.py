@@ -1,4 +1,4 @@
-"""Pipeline state: move the work files between machines through a private hub repo."""
+"""Pipeline state: move the work files between machines through `state/` of a hub repo."""
 
 import pytest
 

@@ -21,7 +21,7 @@ from inat_landscape.adapters.hub import Hub
 from inat_landscape.adapters.images import Fetched, decode, fetch
 from inat_landscape.adapters.inat_dump import PHOTO_URL
 from inat_landscape.domain.sampling import Slots, in_slots
-from inat_landscape.pipeline.errors import StageError
+from inat_landscape.pipeline.errors import require
 from inat_landscape.pipeline.land import LAND, land_only
 from inat_landscape.pipeline.ports import Encoder, Fetcher
 from inat_landscape.pipeline.sample import SAMPLE, SAMPLE_IDS
@@ -89,8 +89,7 @@ def read_sample(workdir: Path, columns: list[str] | None = None) -> pa.Table:
     """
     if _slim_is_enough(workdir, columns):
         return read_table(workdir / SAMPLE_IDS, columns)
-    if not (workdir / SAMPLE).exists():
-        raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
+    require(workdir / SAMPLE, "sample", "sample")
     if columns is None:
         return land_only(workdir, read_table(workdir / SAMPLE))
     table = read_table(workdir / SAMPLE, list(dict.fromkeys([*columns, "h3_cell"])))
@@ -323,18 +322,16 @@ def _decode_or_none(result: Fetched) -> Image.Image | None:
 
 
 def _failure(result: Fetched) -> dict:
-    if result.ok:
-        return {
-            "photo_id": result.photo_id,
-            "status": result.status,
-            "error": "cannot decode image",
-            "permanent": True,
-        }
+    """Return the failure row of a photo: a failed download, or a download that does not
+    decode (permanent)."""
+    error, permanent = (
+        ("cannot decode image", True) if result.ok else (result.error, result.permanent)
+    )
     return {
         "photo_id": result.photo_id,
         "status": result.status,
-        "error": result.error,
-        "permanent": result.permanent,
+        "error": error,
+        "permanent": permanent,
     }
 
 

@@ -109,11 +109,14 @@ def open_source(source: str) -> BinaryIO:
     be the gzipped dump or a decompressed plain tar, which reads much faster (no gzip).
     """
     if source.startswith("https://"):
-        return cast(BinaryIO, io.BufferedReader(_ResumableHttp(source), 1 << 20))
+        return cast(BinaryIO, io.BufferedReader(_ResumableHttp(source), _READ_BUFFER))
     return Path(source).open("rb")
 
 
-_RETRY_WAIT = 5.0  # seconds between two tries
+_READ_BUFFER = 1 << 20  # bytes
+_HTTP_TIMEOUT = 120  # seconds
+_RETRY_WAIT = 5.0  # seconds between two tries, times the try number
+_MAX_WAIT_STEPS = 6  # the wait stops growing after this many tries (30 seconds)
 _RETRIES = 20  # tries in a row with no byte read, before the error goes up
 
 
@@ -142,14 +145,14 @@ class _ResumableHttp(io.RawIOBase):
     def _open(self) -> Any:
         headers = {"Range": f"bytes={self.position}-"}
         request = urllib.request.Request(self.url, headers=headers)  # noqa: S310 - https only
-        return urllib.request.urlopen(request, timeout=120)  # noqa: S310 - https only
+        return urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT)  # noqa: S310 - https only
 
     def _drop(self, attempt: int) -> None:
         if self.response is not None:
             with contextlib.suppress(Exception):
                 self.response.close()
         self.response = None
-        time.sleep(_RETRY_WAIT * min(attempt + 1, 6))
+        time.sleep(_RETRY_WAIT * min(attempt + 1, _MAX_WAIT_STEPS))
 
     def close(self) -> None:
         if self.response is not None:
@@ -283,7 +286,7 @@ def _eligible_observation(
     taxon = pc.or_(
         pc.is_null(batch["taxon_id"]), pc.is_in(batch["taxon_id"], pa.array(eligible_taxa))
     )
-    valid = pc.equal(pc.utf8_length(uuid), _UUID_LENGTH)
+    valid = _valid_uuid(uuid)
     return pc.fill_null(pc.and_(pc.and_(in_sample, located), pc.and_(taxon, valid)), False)
 
 

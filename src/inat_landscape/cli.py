@@ -7,7 +7,6 @@ import argparse
 import json
 import logging
 import sys
-import urllib.error
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +32,7 @@ from inat_landscape.pipeline.embed import (
     run_embed,
 )
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ingest import IngestParams, run_index, run_ingest
+from inat_landscape.pipeline.ingest import DEFAULT_RES, IngestParams, run_index, run_ingest
 from inat_landscape.pipeline.land import run_land
 from inat_landscape.pipeline.ports import Encoder
 from inat_landscape.pipeline.publish import PublishSpec, run_maps, run_publish
@@ -42,7 +41,8 @@ from inat_landscape.pipeline.score import SCORE, run_score
 from inat_landscape.pipeline.state import STATE_FILES, pull_state, push_state
 from inat_landscape.pipeline.status import run_status
 
-_ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, urllib.error.URLError, OSError)
+# The errors that the CLI reports as a clean message (urllib's URLError is an OSError).
+_ERRORS = (StageError, DumpError, HfHubHTTPError, httpx.HTTPError, OSError)
 
 
 def _real_encoder(model_id: str, batch_size: int, compile: bool = False) -> Encoder:
@@ -160,7 +160,12 @@ def _dump_options(p: argparse.ArgumentParser) -> None:
         default=1.0,
         help="share of observations to keep, in (0, 1] (default: 1)",
     )
-    p.add_argument("--res", type=int, default=5, help="H3 resolution of the cells (default: 5)")
+    p.add_argument(
+        "--res",
+        type=int,
+        default=DEFAULT_RES,
+        help=f"H3 resolution of the cells (default: {DEFAULT_RES})",
+    )
     p.add_argument(
         "--cap",
         type=int,
@@ -250,7 +255,7 @@ def _add_embed(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--worker",
         type=_worker,
-        default=(0, 1),
+        default="0/1",  # a string: argparse gives it to `type` too
         help="the slots of this worker: I/N, or I:J/N for slots I to J-1 (default: 0/1)",
     )
     p.add_argument(
@@ -385,8 +390,14 @@ def _land(args: argparse.Namespace, deps: Deps) -> None:
 
 def _diversity(args: argparse.Namespace, deps: Deps) -> None:
     hub = deps.hub(args.repo_id, args.offline)
-    options = {"per_cell": args.per_cell, "min_photos": args.min_photos, "workers": args.workers}
-    table = run_diversity(args.workdir, args.model, hub, **options)
+    table = run_diversity(
+        args.workdir,
+        args.model,
+        hub,
+        per_cell=args.per_cell,
+        min_photos=args.min_photos,
+        workers=args.workers,
+    )
     print(f"diversity_cells={table.num_rows}")
 
 

@@ -15,20 +15,27 @@ from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from inat_landscape.adapters.files import read_table, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.members import in_sorted
 from inat_landscape.domain.sampling import Slots, in_slots
 
-T = TypeVar("T")
-
 _INDEX = "index"  # the done-ids snapshot; not a shard (the embeddings config reads *.parquet)
+_SNAPSHOT = "done-ids.parquet"
+_SNAPSHOT_STAGING = ".snapshot"
+
+
+@dataclass(frozen=True)
+class Pruned:
+    """One remote shard after the prune: the rows it lost, and its new shard ("" if none)."""
+
+    path: str
+    new: str
+    removed: int
 
 
 class EmbeddingStore:
@@ -51,7 +58,7 @@ class EmbeddingStore:
         commit each shard.
         """
         remote = set(self._remote_shards())
-        local = [str(p.relative_to(self.root)) for p in self._shards()]
+        local = [str(p.relative_to(self.root)) for p in self._local_shards()]
         missing = [p for p in local if p not in remote]
         if missing:
             self.hub.upload_folder(self.root, f"Add {len(missing)} embedding shards", missing, [])
@@ -89,7 +96,7 @@ class EmbeddingStore:
         table = pa.table({"photo_id": every}).replace_schema_metadata(
             {b"shards": json.dumps(sorted(set(shards) | covered)).encode()}
         )
-        local = self.root / ".snapshot" / "done-ids.parquet"
+        local = self.root / _SNAPSHOT_STAGING / _SNAPSHOT
         write_table(table, local)
         self.hub.upload_file(local, self._snapshot_path, f"Snapshot of {len(every)} done ids")
         shutil.rmtree(local.parent)
@@ -97,14 +104,14 @@ class EmbeddingStore:
 
     @property
     def _snapshot_path(self) -> str:
-        return f"{self.remote_dir}/{_INDEX}/done-ids.parquet"
+        return f"{self.remote_dir}/{_INDEX}/{_SNAPSHOT}"
 
     def _snapshot(self) -> tuple[np.ndarray, set[str]]:
         """Return the ids and the covered shards of the remote snapshot (none if absent)."""
         if self._snapshot_path not in self.hub.list_files(f"{self.remote_dir}/{_INDEX}/"):
             return np.zeros(0, np.int64), set()
-        staging = self.root / ".snapshot"
-        table = pq.read_table(self.hub.download(self._snapshot_path, staging))
+        staging = self.root / _SNAPSHOT_STAGING
+        table = read_table(self.hub.download(self._snapshot_path, staging))
         shutil.rmtree(staging)
         covered = set(json.loads((table.schema.metadata or {}).get(b"shards", b"[]")))
         return table["photo_id"].to_numpy(), covered
@@ -112,9 +119,8 @@ class EmbeddingStore:
     def _mine(self, path: str) -> bool:
         """Tell if a shard can hold photos of this tag: untagged, or a slot range (or another
         worker count) that overlaps this one."""
-        name = path.rsplit("/", 1)[-1]
         own = _tag_slots(self.tag)
-        other = _tag_slots(name.removeprefix("part-").split("-of")[0].rsplit("-", 1)[0])
+        other = _tag_slots(_shard_tag(path))
         return own is None or other is None or own.overlaps(other)
 
     def stream(self) -> Iterator[tuple[list[int], np.ndarray]]:
@@ -122,14 +128,14 @@ class EmbeddingStore:
         for path in self.shards():
             yield self.read(path)
 
-    def each(self, fn: Callable[[str], T], workers: int = 1) -> list[T]:
+    def each[T](self, fn: Callable[[str], T], workers: int = 1) -> list[T]:
         """Return fn(path) for each shard, in order, with `workers` threads."""
         with ThreadPoolExecutor(workers) as pool:
             return list(pool.map(fn, self.shards()))
 
     def shards(self) -> list[str]:
         """Return the paths of all the shards, local and remote, each once and in order."""
-        local = {str(p.relative_to(self.root)) for p in self._shards()}
+        local = {str(p.relative_to(self.root)) for p in self._local_shards()}
         return sorted(local | set(self._remote_shards()))
 
     def read(self, path: str) -> tuple[list[int], np.ndarray]:
@@ -145,7 +151,7 @@ class EmbeddingStore:
         rows = table["embedding"].combine_chunks().flatten().to_numpy()
         return table["photo_id"].to_pylist(), rows.reshape(table.num_rows, -1)
 
-    def prune(self, keep: np.ndarray, *, workers: int = 1, batch: int = 50) -> list["Pruned"]:
+    def prune(self, keep: np.ndarray, *, workers: int = 1, batch: int = 50) -> list[Pruned]:
         """Remove from the remote shards the photos that are not in `keep`. Return the shards
         that lost rows.
 
@@ -158,7 +164,7 @@ class EmbeddingStore:
         batches = [shards[start : start + batch] for start in range(0, len(shards), batch)]
         return [p for b in batches for p in self._prune_batch(b, keep, workers)]
 
-    def _prune_batch(self, chunk: list[str], keep: np.ndarray, workers: int) -> list["Pruned"]:
+    def _prune_batch(self, chunk: list[str], keep: np.ndarray, workers: int) -> list[Pruned]:
         """Replace the shards of `chunk` that have rows to remove, in one commit."""
         with ThreadPoolExecutor(workers) as pool:
             changed = [p for p in pool.map(self._pruned, chunk, [keep] * len(chunk)) if p.removed]
@@ -166,14 +172,14 @@ class EmbeddingStore:
             self._replace(changed)
         return changed
 
-    def _replace(self, changed: list["Pruned"]) -> None:
+    def _replace(self, changed: list[Pruned]) -> None:
         new = [p.new for p in changed if p.new]
         old = [p.path for p in changed]
         message = f"Prune {len(changed)} embedding shards"
         self.hub.upload_folder(self.root, message, new, [*old, self._snapshot_path])
         _unlink(self.root, [*new, *old])  # a local copy of an old shard would come back
 
-    def _pruned(self, path: str, keep: np.ndarray) -> "Pruned":
+    def _pruned(self, path: str, keep: np.ndarray) -> Pruned:
         """Write the kept rows of a remote shard as a new local shard, if it has rows to
         remove and rows to keep. `keep` is sorted."""
         ids, embeddings = self.read(path)
@@ -181,7 +187,7 @@ class EmbeddingStore:
         removed = int((~mask).sum())
         if removed == 0 or removed == len(ids):
             return Pruned(path, "", removed)
-        tag = path.rsplit("/", 1)[-1].removeprefix("part-").rpartition("-")[0]
+        tag = _shard_tag(path)
         kept = np.asarray(ids, np.int64)[mask].tolist()
         new = _write_shard(self.root, self.remote_dir, tag, kept, embeddings[mask])
         return Pruned(path, str(new.relative_to(self.root)), removed)
@@ -190,8 +196,8 @@ class EmbeddingStore:
         """Return the ids of all photos that have an embedding."""
         return {
             i
-            for shard in self._shards()
-            for i in pq.read_table(shard, columns=["photo_id"])["photo_id"].to_pylist()
+            for shard in self._local_shards()
+            for i in read_table(shard, ["photo_id"])["photo_id"].to_pylist()
         }
 
     def add(self, photo_ids: Sequence[int], embeddings: np.ndarray, *, upload: bool = True) -> Path:
@@ -205,22 +211,13 @@ class EmbeddingStore:
             self.hub.upload_file(path, name, f"Add {len(photo_ids)} embeddings")
         return path
 
-    def _shards(self) -> list[Path]:
+    def _local_shards(self) -> list[Path]:
         return sorted(self.local_dir.glob("part-*.parquet"))
 
 
 def _unlink(root: Path, names: list[str]) -> None:
     for name in names:
         (root / name).unlink(missing_ok=True)
-
-
-@dataclass(frozen=True)
-class Pruned:
-    """One remote shard after the prune: the rows it lost, and its new shard ("" if none)."""
-
-    path: str
-    new: str
-    removed: int
 
 
 def _write_shard(
@@ -234,6 +231,16 @@ def _write_shard(
     column = pa.FixedSizeListArray.from_arrays(flat, embeddings.shape[1])
     write_table(pa.table({"photo_id": pa.array(photo_ids, pa.int64()), "embedding": column}), path)
     return path
+
+
+def shard_name(path: str) -> str:
+    """Return the file name of a shard path."""
+    return path.rsplit("/", 1)[-1]
+
+
+def _shard_tag(path: str) -> str:
+    """Return the worker tag of a shard path (`part-w1of4-….parquet`), or "" for no tag."""
+    return shard_name(path).removeprefix("part-").rpartition("-")[0]
 
 
 def _tag_slots(tag: str) -> Slots | None:

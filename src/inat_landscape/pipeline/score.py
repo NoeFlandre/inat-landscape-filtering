@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from inat_landscape.adapters.embedding_store import EmbeddingStore
+from inat_landscape.adapters.embedding_store import EmbeddingStore, shard_name
 from inat_landscape.adapters.files import read_rows, read_table, write_json, write_table
 from inat_landscape.adapters.hub import Hub
 from inat_landscape.domain.members import in_sorted
@@ -78,7 +78,7 @@ class _Shards:
         """Return the ids, the score columns and the embedding length of the shard."""
         if self.cache is None:
             return self._compute(path)
-        cached = self.cache / path.rsplit("/", 1)[-1]
+        cached = self.cache / shard_name(path)
         if cached.exists():
             return _read_scores(cached)
         ids, columns, dim = self._compute(path)

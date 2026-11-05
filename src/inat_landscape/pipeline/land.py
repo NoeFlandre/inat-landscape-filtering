@@ -7,11 +7,11 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from inat_landscape.adapters.files import read_json, read_table, write_json, write_table
+from inat_landscape.adapters.files import read_table, write_json, write_table
 from inat_landscape.adapters.land import LAND_SOURCES, fetch_land, land_cells
 from inat_landscape.domain.members import in_sorted
-from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.ingest import MANIFEST
+from inat_landscape.pipeline.errors import require
+from inat_landscape.pipeline.ingest import DEFAULT_RES, ingest_params
 from inat_landscape.pipeline.sample import SAMPLE
 
 LAND = "land.parquet"  # the sample cells that touch land; the other cells are left out
@@ -30,12 +30,11 @@ class LandReport:
 def run_land(workdir: Path, fetch: Callable[[], list[dict]] = fetch_land) -> LandReport:
     """Write the sample cells that touch land, and the count of what is left out.
 
-    The sample and the candidates stay as they are: `read_sample` and `publish` drop the
+    The sample and the candidates stay as they are: `read_sample` and `score` drop the
     photos of the other cells.
     """
-    if not (workdir / SAMPLE).exists():
-        raise StageError(f"no sample at {workdir / SAMPLE}: run `sample` first")
-    res = (read_json(workdir / MANIFEST) or {}).get("params", {}).get("res", 5)
+    require(workdir / SAMPLE, "sample", "sample")
+    res = ingest_params(workdir).get("res", DEFAULT_RES)
     sample_cells = read_table(workdir / SAMPLE, ["h3_cell"])["h3_cell"].to_numpy()
     cells, counts = np.unique(sample_cells, return_counts=True)
     grid = land_cells(fetch(), res)
