@@ -1,7 +1,7 @@
 """Pipeline state: hand the work files to another machine through a hub repository.
 
-The state goes under `state/` in a private repository, apart from the public dataset.
-Embeddings are not part of it: they already live in the public dataset.
+The state goes under `state/` of the dataset repository, apart from its configs (ADR 0015).
+Embeddings are not part of it: they already live in the dataset.
 """
 
 from collections.abc import Sequence

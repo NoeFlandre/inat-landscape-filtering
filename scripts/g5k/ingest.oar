@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Grid'5000 OAR batch job, on one CPU node with much memory (for example dahu in Grenoble):
 # read the metadata dump, keep the capped candidates, write the sample in uniform order
-# (ADR 0011), and put the state on the private hub repository.
+# (ADR 0011), and put the state in `state/` of the dataset repository.
 #
 #   oarsub -q default -l "host=1,walltime=1:00:00" -p "gpu_count=0 AND cluster='dahu'" \
 #       "$HOME/inat-landscape-filtering/scripts/g5k/ingest.oar 1000"

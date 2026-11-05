@@ -353,9 +353,17 @@ data/all/*.parquet                      all photos: metadata and scores
 data/<config>/*.parquet                 photos at or above a threshold, {_with_image(info)}
 {info.embedding_dir}/*.parquet   photo_id and SigLIP2 embedding
 assets/                                 figures of this card
+state/                                  work files of the pipeline, not a config:
+  ingest/                               dump index, taxa, eligible photos before the cap
+  sample.parquet, sample-ids.parquet    the uniform sample, before the land filter
+  scored.parquet, failures.parquet      scores of the sample, failed downloads
+  land.parquet, land-grid.parquet       cells on land (sample cells, all land cells)
+  diversity.parquet                     diversity and colour of each cell (maps 2 to 4)
 ```
 
-Configs: `all` (default), {", ".join(f"`{s.config}`" for s in info.subsets)}, `embeddings`.
+Configs: `all` (default), {", ".join(f"`{s.config}`" for s in info.subsets)}, `embeddings`. \
+With `state/`, the [code]({REPO_URL}) runs the pipeline again or extends the sample without \
+the iNaturalist dump (`inat-landscape state pull`).
 """
 
 

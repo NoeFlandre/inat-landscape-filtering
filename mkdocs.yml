@@ -21,4 +21,5 @@ nav:
       - adr/0012-score-cache.md
       - adr/0013-land-only.md
       - adr/0014-diversity-maps.md
+      - adr/0015-state-in-the-dataset.md
   - Technical debt: tech-debt.md

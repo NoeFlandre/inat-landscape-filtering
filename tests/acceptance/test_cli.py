@@ -5,11 +5,12 @@ import json
 import logging
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 
 from inat_landscape.adapters.encoder import SiglipEncoder
-from inat_landscape.adapters.hub import HfHub, OfflineHub
+from inat_landscape.adapters.hub import REPO_ID, HfHub, OfflineHub
 from inat_landscape.adapters.images import fetch
 from inat_landscape.cli import Deps, main
 from tests import fakes
@@ -157,9 +158,6 @@ def test_default_deps_build_real_adapters_lazily():
     real = Deps()
     assert isinstance(real.hub("u/r", True), OfflineHub)
     assert isinstance(real.hub("u/r", False), HfHub)
-    private = real.hub("u/r", False, True)
-    assert isinstance(private, HfHub)
-    assert private.private
     encoder = real.encoder("some/model", 8, True)
     assert isinstance(encoder, SiglipEncoder)
     assert (encoder.model_id, encoder.batch_size, encoder.compile) == ("some/model", 8, True)
@@ -194,3 +192,13 @@ def test_http_clients_log_no_line_per_request(deps, tmp_path):
     _run(deps, tmp_path, "status", "--model", FakeEncoder.model_id)
     for name in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
         assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING, name
+
+
+def test_state_goes_to_the_dataset_repo(deps, tmp_path):
+    repos = []
+    hub = deps.hub()
+    deps = replace(deps, hub=lambda repo_id, *_args: (repos.append(repo_id), hub)[1])
+    assert _run(deps, tmp_path, "ingest", "--fraction", "0.25") == 0
+    assert _run(deps, tmp_path, "state", "push") == 0
+    assert repos[-1] == REPO_ID
+    assert "state/ingest/manifest.json" in hub.list_files("state/")

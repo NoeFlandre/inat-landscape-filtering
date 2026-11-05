@@ -128,9 +128,15 @@ data/all/*.parquet                      all photos: metadata and scores
 data/<config>/*.parquet                 photos at or above a threshold, with the 500 px image
 embeddings/siglip2-base-patch16-224/small/*.parquet   photo_id and SigLIP2 embedding
 assets/                                 figures of this card
+state/                                  work files of the pipeline, not a config:
+  ingest/                               dump index, taxa, eligible photos before the cap
+  sample.parquet, sample-ids.parquet    the uniform sample, before the land filter
+  scored.parquet, failures.parquet      scores of the sample, failed downloads
+  land.parquet, land-grid.parquet       cells on land (sample cells, all land cells)
+  diversity.parquet                     diversity and colour of each cell (maps 2 to 4)
 ```
 
-Configs: `all` (default), `score_ge_0_10`, `score_ge_0_50`, `score_ge_0_90`, `embeddings`.
+Configs: `all` (default), `score_ge_0_10`, `score_ge_0_50`, `score_ge_0_90`, `embeddings`. With `state/`, the [code](https://github.com/NoeFlandre/inat-landscape-filtering) runs the pipeline again or extends the sample without the iNaturalist dump (`inat-landscape state pull`).
 
 ## Scores
 

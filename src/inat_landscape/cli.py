@@ -16,7 +16,7 @@ from typing import BinaryIO
 import httpx
 from huggingface_hub.errors import HfHubHTTPError
 
-from inat_landscape.adapters.hub import REPO_ID, STATE_REPO_ID, HfHub, Hub, OfflineHub
+from inat_landscape.adapters.hub import REPO_ID, HfHub, Hub, OfflineHub
 from inat_landscape.adapters.images import Fetched, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL, DumpError, open_source
 from inat_landscape.adapters.land import fetch_land
@@ -51,8 +51,8 @@ def _real_encoder(model_id: str, batch_size: int, compile: bool = False) -> Enco
     return SiglipEncoder(model_id, batch_size, compile=compile)
 
 
-def _real_hub(repo_id: str, offline: bool, private: bool = False) -> Hub:
-    return OfflineHub() if offline else HfHub(repo_id, private=private)
+def _real_hub(repo_id: str, offline: bool) -> Hub:
+    return OfflineHub() if offline else HfHub(repo_id)
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,9 @@ def _parser() -> argparse.ArgumentParser:
     _add_embed(sub)
     _add_score(sub)
     _add_publish(sub)
-    state = sub.add_parser("state", help="push or pull the work files to a private hub repo")
+    state = sub.add_parser(
+        "state", help="push or pull the work files (`state/` of the dataset repo)"
+    )
     state.add_argument("action", choices=("push", "pull"), help="direction of the transfer")
     state.add_argument(
         "--only",
@@ -134,8 +136,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     state.add_argument(
         "--state-repo",
-        default=STATE_REPO_ID,
-        help=f"private HF dataset repo (default: {STATE_REPO_ID})",
+        default=REPO_ID,
+        help=f"HF dataset repo of the state (default: {REPO_ID})",
     )
     state.set_defaults(handler=_state)
     status = sub.add_parser("status", help="print the row count of each stage output as JSON")
@@ -457,7 +459,7 @@ def _publish(args: argparse.Namespace, deps: Deps) -> None:
 
 
 def _state(args: argparse.Namespace, deps: Deps) -> None:
-    hub = deps.hub(args.state_repo, False, True)
+    hub = deps.hub(args.state_repo, False)
     if args.action == "push":
         print(" ".join(push_state(args.workdir, hub)))
     else:

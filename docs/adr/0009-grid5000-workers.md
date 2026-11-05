@@ -10,7 +10,7 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 
 - `embed --worker I/N` keeps the photos with `photo_id mod N = I`. N jobs run in parallel without overlap.
 - Each job has a walltime of 1 hour. The embeddings on Hugging Face are the record of done work, so a new job continues the work of an old one.
-- The jobs read the sample from a private Hugging Face repository (`state pull`). Grid'5000 does not read the metadata dump.
+- The jobs read the sample from a private Hugging Face repository (`state pull`; now `state/` of the dataset, ADR 0015). Grid'5000 does not read the metadata dump.
 - PyTorch comes from a uv dependency group: `cpu` (default) or `cu126` (Grid'5000).
 - The work directory and the caches are on the node-local `/tmp`. `/home` keeps only the repository and its environment.
 - Shards have 50,000 photos: about 37 commits on Hugging Face instead of 1,800.
@@ -49,5 +49,5 @@ With a cap of 10 photos per H3 cell, the sample has 1.8 million photos. The CPU 
 - The final `score` and `publish` (without images) took about 2.5 hours on one CPU node. The default-queue CPU nodes of Grenoble were busy for hours, so the job ran in the production queue of Nancy, with a walltime of 4 hours.
 - A second `publish` stopped on a node with 96 GB of memory: the system stopped the process (exit 137) after `score`. A node with 192 GB is necessary (`memnode>=190000`).
 - With 8 parallel shard reads and the score cache (ADR 0012), `score` took 32 minutes in place of about 2 hours, and the total job took about 1 hour on a Rennes production node.
-- After the run, `~/.hf_token` was deleted on all nine sites. The private state repository stays.
+- After the run, `~/.hf_token` was deleted on all nine sites. The private state repository stays (until ADR 0015).
 - After the land filter and the diversity maps (ADR 0013, ADR 0014), all the data on the nine sites was deleted (only `~/.ssh` and the shell profiles stay), with the second token.

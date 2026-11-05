@@ -10,7 +10,6 @@ from huggingface_hub import HfApi, HfFileSystem
 from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 REPO_ID = "NoeFlandre/inat-landscape-filtering"
-STATE_REPO_ID = "NoeFlandre/inat-landscape-filtering-state"
 
 
 class Hub(Protocol):

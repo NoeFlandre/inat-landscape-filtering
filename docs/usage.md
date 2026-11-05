@@ -26,7 +26,7 @@ uv run inat-landscape publish --thresholds 0.0005,0.001,0.002 --cap-per-cell 100
 - To work without the Hugging Face repository, add `--offline` to `embed`, `score` and `publish`.
 
 - `embed --worker I/N` embeds one share of the photos, for parallel jobs. See [Grid'5000](grid5000.md).
-- `state push` and `state pull` move the work files through a private Hugging Face repository.
+- `state push` and `state pull` move the work files through `state/` of the dataset repository (ADR 0015).
 
 Use `uv run inat-landscape status` to see the row count of each step.
 Use `uv run inat-landscape COMMAND --help` to see all options.
