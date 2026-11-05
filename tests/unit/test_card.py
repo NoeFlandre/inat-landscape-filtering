@@ -243,7 +243,7 @@ def test_card_without_the_land_stage_says_nothing_of_the_sea():
     assert "Coasts" not in text
 
 
-def test_card_explains_the_three_maps():
+def test_card_explains_the_four_maps():
     text = render_card(replace(_info(), diversity_per_cell=50, diversity_min_photos=20))
     assert "](assets/map.png)\n\n**Map 1, photos per cell.** For each H3 cell (resolution" in text
     assert (
@@ -255,7 +255,10 @@ def test_card_explains_the_three_maps():
         "colour](assets/look.png)\n\n**Map 3, what the photos show.** For each H3 cell, the mean "
         "SigLIP2 embedding of the same 50 photos, projected on the 3 first principal components "
         "of all the cells, as red, green and blue. Places with similar colours have similar "
-        "photos; a colour has no fixed meaning.\n" in text
+        "photos; a colour has no fixed meaning.\n\n![What the photos of each H3 cell show, in "
+        "detail](assets/look-detail.png)\n\n**Map 4, Map 3 in detail.** The same colours, with "
+        "hexagons of 0.25° in place of 2°: a hexagon gives the mean of a few cells, not of 100 or "
+        "more. Open the image to zoom in.\n" in text
     )
     info = _info()
     assert (
@@ -271,5 +274,8 @@ def test_card_without_the_diversity_maps_has_one_map():
     assert "Each map gives" not in text
 
 
-def test_the_map_has_no_grey_layer():
-    assert "grey" not in render_card(replace(_info(), diversity_per_cell=50)).lower()
+def test_the_maps_show_land_with_no_value_in_grey_after_the_land_stage():
+    grey = " On each map, light grey is land with no value, and white is sea.\n"
+    assert grey not in render_card(replace(_info(), diversity_per_cell=50))
+    land = replace(_info(), diversity_per_cell=50, sea_photos=3, sea_cells=1)
+    assert "gives the mean of its cells." + grey in render_card(land)

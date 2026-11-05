@@ -16,7 +16,7 @@ from inat_landscape.adapters.files import (
     read_table,
     write_table,
 )
-from inat_landscape.adapters.geo import cell_centers
+from inat_landscape.adapters.geo import cell_centers, children
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
 from inat_landscape.adapters.hub import REPO_ID, Hub
 from inat_landscape.adapters.images import decode, fetch
@@ -39,7 +39,7 @@ from inat_landscape.pipeline.embed import (
 )
 from inat_landscape.pipeline.errors import StageError
 from inat_landscape.pipeline.ingest import MANIFEST
-from inat_landscape.pipeline.land import LAND, LAND_REPORT
+from inat_landscape.pipeline.land import LAND, LAND_GRID, LAND_REPORT
 from inat_landscape.pipeline.ports import Fetcher
 from inat_landscape.pipeline.score import EMBEDDINGS, SCORE, SCORED
 
@@ -113,14 +113,31 @@ def run_publish(
     return PublishReport(table.num_rows, subsets, int((kept[0] & ~has_image).sum()))
 
 
-def run_maps(workdir: Path, hub: Hub) -> None:
-    """Draw the diversity maps again and upload them alone: the card does not change."""
+DIVERSITY_MAPS = ("assets/diversity.png", "assets/look.png", "assets/look-detail.png")
+DETAIL_HEXAGON = 0.25  # degrees: a few H3 cells of resolution 5 per hexagon, not 100 or more
+DETAIL_DPI = 400
+
+
+def run_maps(workdir: Path, hub: Hub) -> list[str]:
+    """Draw the maps again and upload them alone: the card does not change.
+
+    The map of photos per cell is drawn too if the `all` config is in the work directory.
+    Return the uploaded files.
+    """
     if read_diversity(workdir) is None:
         raise StageError(f"no diversity at {workdir}: run `diversity` first")
-    root = workdir / HUB_DIR
-    _diversity_maps(root / "assets", workdir, _params(workdir).get("res", 5))
-    maps = ["assets/diversity.png", "assets/look.png"]
-    hub.upload_folder(root, "Update the diversity maps", allow=maps, delete=[])
+    root, params = workdir / HUB_DIR, _params(workdir)
+    folder, land = root / "assets", _land_points(workdir)
+    maps = list(DIVERSITY_MAPS)
+    published = root / "data" / "all"
+    if published.exists():
+        columns = ["h3_cell", "longitude", "latitude"]
+        cap = params.get("cap", PublishSpec.cap_per_cell)
+        _world_map(folder, read_table(published, columns), cap, params.get("res", 5), land)
+        maps.insert(0, "assets/map.png")
+    _diversity_maps(folder, workdir, params.get("res", 5), land)
+    hub.upload_folder(root, "Update the maps", allow=maps, delete=[])
+    return maps
 
 
 def _write_all(workdir: Path) -> tuple[pa.Table, int | None]:
@@ -276,24 +293,11 @@ def _years(table: pa.Table) -> tuple[str, str]:
 
 
 def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) -> None:
-    params = _params(workdir)
-    per_cell = table.group_by("h3_cell").aggregate(
-        [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]
-    )
-    cells = (
-        per_cell["longitude_mean"].to_pylist(),
-        per_cell["latitude_mean"].to_pylist(),
-        per_cell["h3_cell_count"].to_pylist(),
-    )
-
+    params, land = _params(workdir), _land_points(workdir)
     figures.pipeline(folder / "hero.png", with_images=spec.images, land=(workdir / LAND).exists())
-    figures.world_map(
-        folder / "map.png",
-        cells,
-        cap=params.get("cap", spec.cap_per_cell),
-        res=params.get("res", 5),
-    )
-    _diversity_maps(folder, workdir, params.get("res", 5))
+    cap, res = params.get("cap", spec.cap_per_cell), params.get("res", 5)
+    _world_map(folder, table, cap, res, land)
+    _diversity_maps(folder, workdir, res, land)
     figures.score_histogram(
         folder / "scores.png",
         table[spec.score].to_pylist(),
@@ -303,8 +307,35 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
     )
 
 
-def _diversity_maps(folder: Path, workdir: Path, res: int) -> None:
-    """Draw the visual diversity and the colour of each cell, if the diversity stage ran."""
+def _world_map(
+    folder: Path, table: pa.Table, cap: int, res: int, land: figures.Points | None
+) -> None:
+    """Draw the count of photos of each cell."""
+    per_cell = table.group_by("h3_cell").aggregate(
+        [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]
+    )
+    cells = (
+        per_cell["longitude_mean"].to_pylist(),
+        per_cell["latitude_mean"].to_pylist(),
+        per_cell["h3_cell_count"].to_pylist(),
+    )
+    figures.world_map(folder / "map.png", cells, cap=cap, res=res, land=land)
+
+
+def _land_points(workdir: Path) -> figures.Points | None:
+    """Return the centres of the children of all the land cells (finer than the cells, so
+    that the small hexagons of the detailed map have points), if the land stage ran."""
+    if not (workdir / LAND_GRID).exists():
+        return None
+    cells = read_table(workdir / LAND_GRID)["h3_cell"].to_numpy()
+    res = _params(workdir).get("res", 5)
+    lat, lon = cell_centers(children(cells, res + 1))
+    return lon, lat
+
+
+def _diversity_maps(folder: Path, workdir: Path, res: int, land: figures.Points | None) -> None:
+    """Draw the visual diversity and the colour of each cell, if the diversity stage ran.
+    The colour map is drawn twice: with 2° hexagons as the other maps, and in detail."""
     found = read_diversity(workdir)
     if found is None:
         return
@@ -312,9 +343,14 @@ def _diversity_maps(folder: Path, workdir: Path, res: int) -> None:
     lat, lon = cell_centers(table["h3_cell"].to_numpy())
     values = table["diversity"].to_numpy()
     per_cell = params["per_cell"]
-    figures.diversity_map(folder / "diversity.png", (lon, lat, values), per_cell=per_cell, res=res)
+    figures.diversity_map(
+        folder / "diversity.png", (lon, lat, values), per_cell=per_cell, res=res, land=land
+    )
     pcs = np.stack([table[f"pc{i}"].to_numpy() for i in (1, 2, 3)], axis=1)
-    figures.look_map(folder / "look.png", lon, lat, to_unit_range(pcs))
+    rgb = to_unit_range(pcs)
+    figures.look_map(folder / "look.png", lon, lat, rgb, land=land)
+    detail = folder / "look-detail.png"
+    figures.look_map(detail, lon, lat, rgb, land=land, size=DETAIL_HEXAGON, dpi=DETAIL_DPI)
 
 
 def _examples(path: Path, table: pa.Table, spec: PublishSpec, fetcher: Fetcher) -> None:

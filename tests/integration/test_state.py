@@ -50,6 +50,7 @@ def test_state_files_cover_the_hand_off_points():
         "failures.parquet",
         "land.parquet",
         "land.json",
+        "land-grid.parquet",
         "diversity.parquet",
     }
 

@@ -6,10 +6,11 @@ import h3
 import numpy as np
 import pytest
 
+from inat_landscape.adapters.files import read_table
 from inat_landscape.adapters.land import LAND_SOURCES, fetch_land, land_cells
 from inat_landscape.pipeline.embed import read_sample
 from inat_landscape.pipeline.errors import StageError
-from inat_landscape.pipeline.land import LAND_REPORT, on_land, run_land
+from inat_landscape.pipeline.land import LAND_GRID, LAND_REPORT, on_land, run_land
 from tests.integration.pipeline_helpers import prepared
 
 # A small square around the photos 101 and 102 (45.5 N, 3.25 E); 103 and 107 are "at sea".
@@ -45,6 +46,8 @@ def test_run_land_keeps_the_sample_cells_on_land(tmp_path):
     assert sorted(read_sample(tmp_path)["photo_id"].to_pylist()) == [101, 102]
     assert sorted(read_sample(tmp_path, ["photo_id"])["photo_id"].to_pylist()) == [101, 102]
     assert read_sample(tmp_path, ["photo_id"]).column_names == ["photo_id"]
+    grid = read_table(tmp_path / LAND_GRID)["h3_cell"].to_numpy()
+    assert grid.tolist() == land_cells([SQUARE], 5).tolist()  # all land, not only the sample
 
 
 def test_without_the_land_stage_every_cell_stays(tmp_path):

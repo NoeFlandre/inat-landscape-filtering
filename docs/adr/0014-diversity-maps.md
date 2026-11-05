@@ -13,8 +13,10 @@ The card map gives the count of photos in each H3 cell. It does not tell what th
 - A cell keeps only the sum and the count of the unit embeddings of its photos. For n unit vectors with sum s, the mean cosine distance over the pairs is 1 - (|s|² - n) / (n (n - 1)). Thus there is no loop over pairs, and the shards can be read in any order.
 - Diversity: that mean cosine distance. Colour: the 3 first principal components of the mean embeddings of the cells, scaled between their 2nd and 98th percentiles, as red, green and blue.
 - The colour map uses the same 2° hexagons as the other maps: each hexagon has the mean red, green and blue of its cells.
-- `publish --maps-only` draws the two maps again from `diversity.parquet` and uploads only them: the card, the configs and the scores do not change.
-- `diversity.parquet` keeps, for each cell: `h3_cell`, `photos`, `diversity`, `pc1`, `pc2`, `pc3`. `publish` draws `assets/diversity.png` and `assets/look.png` from it, and the card explains the three maps in one paragraph.
+- A fourth map shows the same colours in detail: hexagons of 0.25° in place of 2°, at 400 dpi. It uses the same principal components: there is no second computation.
+- On each map, light grey is land with no value. White is sea. The grey comes from `land-grid.parquet`: all the land cells of the `land` stage (ADR 0013), not only the sample cells. The maps use the centres of their children (resolution 6), so that each small hexagon of the detailed map on land has a point.
+- `publish --maps-only` draws the maps again and uploads only them: the card, the configs and the scores do not change. It draws the map of photos per cell too if the `all` config is in the work directory.
+- `diversity.parquet` keeps, for each cell: `h3_cell`, `photos`, `diversity`, `pc1`, `pc2`, `pc3`. `publish` draws `assets/diversity.png`, `assets/look.png` and `assets/look-detail.png` from it, and the card explains each map.
 
 ## Consequences
 

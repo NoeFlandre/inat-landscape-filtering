@@ -2,6 +2,7 @@
 
 import json
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -258,17 +259,47 @@ def test_publish_draws_the_diversity_maps_after_the_diversity_stage(scored):
     card = (workdir / HUB_DIR / "README.md").read_text()
     assert "](assets/diversity.png)" in card
     assert "50 random photos of the cell" in card
-    for name in ("diversity", "look"):
+    assert "](assets/look-detail.png)" in card
+    for name in ("diversity", "look", "look-detail"):
         assert (workdir / HUB_DIR / "assets" / f"{name}.png").read_bytes()[:4] == b"\x89PNG"
 
 
-def test_maps_only_uploads_the_two_diversity_maps(scored):
+DIVERSITY_MAPS = ["assets/diversity.png", "assets/look.png", "assets/look-detail.png"]
+
+
+def test_maps_only_uploads_the_diversity_maps(scored):
     workdir, hub, _, _ = scored
     run_diversity(workdir, FakeEncoder.model_id, hub, min_photos=2)
-    run_maps(workdir, hub)
-    assert hub.folder_uploads[-1] == (["assets/diversity.png", "assets/look.png"], [])
-    assert {"assets/diversity.png", "assets/look.png"} <= set(hub.list_files("assets/"))
+    assert run_maps(workdir, hub) == DIVERSITY_MAPS
+    assert hub.folder_uploads[-1] == (DIVERSITY_MAPS, [])
+    assert set(DIVERSITY_MAPS) <= set(hub.list_files("assets/"))
     assert "README.md" not in hub.list_files("")
+
+
+def test_maps_only_draws_the_cell_map_again_from_the_local_all_config(scored, monkeypatch):
+    workdir, hub, _, _ = scored
+    _publish(workdir, hub, (0.0,))
+    run_diversity(workdir, FakeEncoder.model_id, hub, min_photos=2)
+    maps = []
+    monkeypatch.setattr(figures, "world_map", lambda path, cells, **k: maps.append((cells, k)))
+    assert run_maps(workdir, hub) == ["assets/map.png", *DIVERSITY_MAPS]
+    assert len(maps) == 1
+    assert sum(maps[0][0][2]) == len(_remote(hub, "all"))
+    assert maps[0][1]["cap"] == 1000  # the cap of the run
+
+
+def test_maps_draw_the_land_grid_in_grey_after_the_land_stage(scored, monkeypatch):
+    workdir, hub, _, _ = scored
+    square = [[3.0, 45.3], [3.5, 45.3], [3.5, 45.7], [3.0, 45.7], [3.0, 45.3]]
+    run_land(workdir, lambda: [{"type": "Polygon", "coordinates": [square]}])
+    run_diversity(workdir, FakeEncoder.model_id, hub, min_photos=1)
+    lands = []
+    monkeypatch.setattr(figures, "look_map", lambda path, *a, **k: lands.append(k["land"]))
+    run_maps(workdir, hub)
+    lon, lat = lands[0]
+    assert len(lon) == len(lat) > 7  # the res 6 children of the land cells
+    assert np.all((lon > 2.7) & (lon < 3.8) & (lat > 45.0) & (lat < 46.0))  # near the square
+    assert lands[1] is lands[0]  # computed once for both colour maps
 
 
 def test_maps_only_needs_the_diversity_stage(scored):

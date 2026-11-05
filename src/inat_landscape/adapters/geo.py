@@ -1,5 +1,7 @@
 """H3 cells of coordinates."""
 
+from itertools import chain
+
 import numpy as np
 from h3.api import basic_int as h3
 from numpy.typing import NDArray
@@ -18,3 +20,9 @@ def cell_centers(cells: NDArray[np.integer]) -> tuple[NDArray[np.float64], NDArr
     """Return the latitude and longitude of the centre of each H3 cell."""
     points = np.array([h3.cell_to_latlng(int(c)) for c in cells], dtype=float).reshape(-1, 2)
     return points[:, 0], points[:, 1]
+
+
+def children(cells: NDArray[np.integer], res: int) -> NDArray[np.uint64]:
+    """Return the cells of resolution `res` inside each of `cells`."""
+    found = chain.from_iterable(h3.cell_to_children(int(c), res) for c in cells)
+    return np.fromiter(found, np.uint64)

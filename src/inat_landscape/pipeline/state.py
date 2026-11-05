@@ -24,6 +24,7 @@ STATE_FILES = (
     "failures.parquet",
     "land.parquet",  # the cells that touch land (ADR 0013)
     "land.json",
+    "land-grid.parquet",
     "diversity.parquet",  # visual diversity per cell (ADR 0014)
 )
 _PREFIX = "state/"

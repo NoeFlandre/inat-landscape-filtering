@@ -438,8 +438,8 @@ def _score(args: argparse.Namespace, deps: Deps) -> None:
 
 def _publish(args: argparse.Namespace, deps: Deps) -> None:
     if args.maps_only:
-        run_maps(args.workdir, deps.hub(args.repo_id, args.offline))
-        print("maps=assets/diversity.png,assets/look.png")
+        maps = run_maps(args.workdir, deps.hub(args.repo_id, args.offline))
+        print("maps=" + ",".join(maps))
         return
     spec = PublishSpec(
         args.thresholds, score=args.score, cap_per_cell=args.cap_per_cell, images=args.images

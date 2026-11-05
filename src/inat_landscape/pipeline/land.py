@@ -16,6 +16,7 @@ from inat_landscape.pipeline.sample import SAMPLE
 
 LAND = "land.parquet"  # the sample cells that touch land; the other cells are left out
 LAND_REPORT = "land.json"
+LAND_GRID = "land-grid.parquet"  # all the land cells: the maps draw them in grey
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,10 @@ def run_land(workdir: Path, fetch: Callable[[], list[dict]] = fetch_land) -> Lan
     res = (read_json(workdir / MANIFEST) or {}).get("params", {}).get("res", 5)
     sample_cells = read_table(workdir / SAMPLE, ["h3_cell"])["h3_cell"].to_numpy()
     cells, counts = np.unique(sample_cells, return_counts=True)
-    on_land = np.isin(cells.astype(np.uint64), land_cells(fetch(), res))
+    grid = land_cells(fetch(), res)
+    on_land = np.isin(cells.astype(np.uint64), grid)
     write_table(pa.table({"h3_cell": pa.array(cells[on_land])}), workdir / LAND)
+    write_table(pa.table({"h3_cell": pa.array(grid)}), workdir / LAND_GRID)
     report = LandReport(int((~on_land).sum()), int(counts[~on_land].sum()))
     write_json({"sources": list(LAND_SOURCES), **vars(report)}, workdir / LAND_REPORT)
     return report

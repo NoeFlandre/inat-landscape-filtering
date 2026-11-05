@@ -91,7 +91,7 @@ def test_full_pilot_flow(deps, tmp_path, capsys):
     assert "sea_cells=0 sea_photos=0" in out
     assert "pruned_shards=0 pruned_rows=0" in out
     assert "diversity_cells=" in out
-    assert "maps=assets/diversity.png,assets/look.png" in out
+    assert "maps=assets/diversity.png,assets/look.png,assets/look-detail.png" in out
     assert "cap 1: 3 photos, 3 cells at the cap" in out
     assert "candidates=4" in out
     assert "sample=4" in out
