@@ -208,7 +208,8 @@ threshold keep {"their image" if info.with_images else "the URL of their image"}
 ({info.total - info.no_location:,} with a location), each with a zero-shot SigLIP2 score \
 that tells if the photo shows a landscape.**
 
-**{low.rows:,} photos reach the lowest threshold ({low.threshold} on `{info.score}`, at most \
+**{low.rows:,} photos reach the lowest proposed threshold \
+({low.threshold} on `{info.score}`, at most \
 {info.cap_per_cell} per H3 cell) and come with {_image_words(info)}. All {info.total:,} come \
 with a {info.embedding_dim}-dimension \
 [`{info.model_id}`](https://huggingface.co/{info.model_id}) image embedding.**
@@ -256,8 +257,8 @@ def _contents(info: CardInfo) -> str:
 ![Distribution of {info.score}, with the thresholds](assets/scores.png)
 
 The mosaic shows random CC0 photos of each band of `{info.score}` (240 px, cut square), \
-highest band at the top. The two lowest bands are below the lowest threshold: they show the \
-photos that the thresholds remove.
+highest band at the top. The two lowest bands are below the lowest proposed \
+threshold: they show the photos that the thresholds remove.
 
 ![Random CC0 photos of each band of {info.score}](assets/examples.jpg)
 
@@ -404,7 +405,8 @@ bucket.
 [`{info.model_id}`](https://huggingface.co/{info.model_id}). Download and decode cost more \
 than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).
-7. **Thresholds.** {", ".join(str(s.threshold) for s in info.subsets)} on `{info.score}`. \
+7. **Thresholds.** {", ".join(str(s.threshold) for s in info.subsets)} on `{info.score}`, \
+as examples. These values are arbitrary: choose your own threshold on the `all` config. \
 Each threshold config keeps at most {info.cap_per_cell} photos per cell, the best scored, \
 {_with_image(info)}.
 
@@ -417,7 +419,7 @@ Code, with the decisions and their tradeoffs: [{REPO_URL.removeprefix("https://"
 to a random point in a cell of about 0.2°. The source has no flag for this.
 {_missing_locations(info.no_location)}{_coasts(info)}* **What the location means.** \
 It is where the observer or the organism was, not the area in view.
-* **No validation.** The thresholds come from a visual check, not from labels.
+* **No validation.** The proposed thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
 """
 

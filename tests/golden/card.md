@@ -34,7 +34,7 @@ configs:
 
 **10 iNaturalist photos of all taxa (8 with a location), each with a zero-shot SigLIP2 score that tells if the photo shows a landscape.**
 
-**4 photos reach the lowest threshold (0.1 on `score_landscape`, at most 100 per H3 cell) and come with their 500 px image. All 10 come with a 768-dimension [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224) image embedding.**
+**4 photos reach the lowest proposed threshold (0.1 on `score_landscape`, at most 100 per H3 cell) and come with their 500 px image. All 10 come with a 768-dimension [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224) image embedding.**
 
 The photos come from the [iNaturalist Open Data](https://github.com/inaturalist/inaturalist-open-data) snapshot of 2026-10-27, observed from 2001-01-01 to 2026-10-01. Every row is one photo with its location, date, taxon, licence and scores. The goal is a set of ground-level photos that show land use and land cover, to pair with remote sensing. The run is in progress: 10 of the 1,234 sample photos are scored. The scores have no human validation yet.
 
@@ -71,7 +71,7 @@ WHERE a.score_landscape >= 0.001 AND a.license <> 'CC-BY-NC';
 
 ![Distribution of score_landscape, with the thresholds](assets/scores.png)
 
-The mosaic shows random CC0 photos of each band of `score_landscape` (240 px, cut square), highest band at the top. The two lowest bands are below the lowest threshold: they show the photos that the thresholds remove.
+The mosaic shows random CC0 photos of each band of `score_landscape` (240 px, cut square), highest band at the top. The two lowest bands are below the lowest proposed threshold: they show the photos that the thresholds remove.
 
 ![Random CC0 photos of each band of score_landscape](assets/examples.jpg)
 
@@ -152,7 +152,7 @@ Each score is `sigmoid(scale * cosine + bias)` between the image embedding and a
 4. **Licences.** Only photos under CC0, CC-BY or CC-BY-NC, the licences of the open data bucket.
 5. **Embeddings.** The `small` photo (240 px longest side) goes through [`google/siglip2-base-patch16-224`](https://huggingface.co/google/siglip2-base-patch16-224). Download and decode cost more than the model at scale; the model input is 224 px anyway.
 6. **Scores.** Zero-shot, from the stored embeddings (see [Scores](#scores)).
-7. **Thresholds.** 0.1, 0.5, 0.9 on `score_landscape`. Each threshold config keeps at most 100 photos per cell, the best scored, with the 500 px image.
+7. **Thresholds.** 0.1, 0.5, 0.9 on `score_landscape`, as examples. These values are arbitrary: choose your own threshold on the `all` config. Each threshold config keeps at most 100 photos per cell, the best scored, with the 500 px image.
 
 Code, with the decisions and their tradeoffs: [github.com/NoeFlandre/inat-landscape-filtering](https://github.com/NoeFlandre/inat-landscape-filtering).
 
@@ -161,7 +161,7 @@ Code, with the decisions and their tradeoffs: [github.com/NoeFlandre/inat-landsc
 * **Obscured locations.** iNaturalist moves some locations (threatened taxa, user choice) to a random point in a cell of about 0.2°. The source has no flag for this.
 * **Missing locations.** 2 photos have no coordinates. Filter on `latitude IS NOT NULL`.
 * **What the location means.** It is where the observer or the organism was, not the area in view.
-* **No validation.** The thresholds come from a visual check, not from labels.
+* **No validation.** The proposed thresholds come from a visual check, not from labels.
 * **Bias.** iNaturalist users are most active in North America and Europe; the map shows it.
 
 ## License
