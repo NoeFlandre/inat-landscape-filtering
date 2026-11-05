@@ -4,8 +4,10 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from inat_landscape.domain.cells import MAP_RES
+
 REPO_URL = "https://github.com/NoeFlandre/inat-landscape-filtering"
-_CELL_AREAS = {5: "about 250 km²", 6: "about 36 km²", 7: "about 5 km²"}
+_CELL_AREAS = {4: "about 1,800 km²", 5: "about 250 km²", 6: "about 36 km²", 7: "about 5 km²"}
 _SIZE_CATEGORIES = (
     (1_000, "n<1K"),
     (10_000, "1K<n<10K"),
@@ -438,8 +440,9 @@ def _diversity_maps(info: CardInfo) -> str:
     k = info.diversity_per_cell
     return f"""
 **Map 1, photos per cell.** For each H3 cell (resolution {info.h3_res}), the count of \
-published photos, at most {info.embed_cap:,}. A hexagon of the map is 2° wide and gives the \
-mean of its cells.{_grey(info)}
+published photos, at most {info.embed_cap:,}. Each map shows the H3 cells of resolution \
+{MAP_RES} ({_CELL_AREAS[MAP_RES]}), each with the mean of its cells, on the Equal Earth \
+projection, which keeps the areas.{_grey(info)}
 
 ![Visual diversity of each H3 cell](assets/diversity.png)
 
@@ -453,11 +456,6 @@ fewer than {info.diversity_min_photos} photos has no value.
 **Map 3, what the photos show.** For each H3 cell, the mean SigLIP2 embedding of the same \
 {k} photos, projected on the 3 first principal components of all the cells, as red, green \
 and blue. Places with similar colours have similar photos; a colour has no fixed meaning.
-
-![What the photos of each H3 cell show, in detail](assets/look-detail.png)
-
-**Map 4, Map 3 in detail.** The same colours, with hexagons of 0.25° in place of 2°: a \
-hexagon gives the mean of a few cells, not of 100 or more. Open the image to zoom in.
 """
 
 

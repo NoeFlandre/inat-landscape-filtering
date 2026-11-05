@@ -5,7 +5,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inat_landscape.domain.cells import cap_first, top_per_cell
+from inat_landscape.domain.cells import cap_first, group_mean, top_per_cell
 
 rows = st.lists(
     st.tuples(st.integers(0, 4), st.integers(0, 50), st.integers(0, 3)), max_size=60
@@ -80,3 +80,26 @@ def test_top_per_cell_breaks_ties_by_row_order():
 def test_top_per_cell_rejects_negative_cap():
     with pytest.raises(ValueError, match="cap must be >= 0"):
         top_per_cell(np.array([1]), np.array([0.1]), -1)
+
+
+def test_group_mean_of_values_and_of_rows():
+    groups, means = group_mean(np.array([7, 3, 7, 7]), np.array([1.0, 5.0, 2.0, 6.0]))
+    assert groups.tolist() == [3, 7]
+    assert means.tolist() == [5.0, 3.0]
+    rows = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
+    groups, means = group_mean(np.array([2, 2, 9]), rows)
+    assert groups.tolist() == [2, 9]
+    assert means.tolist() == [[0.5, 0.5], [0.5, 0.5]]
+
+
+def test_group_mean_of_nothing():
+    groups, means = group_mean(np.zeros(0, np.int64), np.zeros(0))
+    assert (len(groups), len(means)) == (0, 0)
+
+
+@given(st.lists(st.tuples(st.integers(0, 4), st.floats(-10, 10)), min_size=1, max_size=40))
+def test_group_mean_matches_naive_definition(pairs):
+    groups, means = group_mean(*(np.array(a) for a in zip(*pairs, strict=True)))
+    assert groups.tolist() == sorted({k for k, _ in pairs})
+    for g, m in zip(groups.tolist(), means.tolist(), strict=True):
+        assert np.isclose(m, np.mean([v for k, v in pairs if k == g]))

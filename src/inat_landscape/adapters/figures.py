@@ -9,9 +9,14 @@ import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import PolyCollection
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
-from matplotlib.patches import FancyBboxPatch, Rectangle
+from matplotlib.patches import FancyBboxPatch, Polygon, Rectangle
 from PIL import Image
+
+from inat_landscape.adapters.geo import outlines
+from inat_landscape.domain.cells import MAP_RES
+from inat_landscape.domain.projection import equal_earth
 
 BG = "#fbfbf9"
 INK = "#24343f"
@@ -33,14 +38,19 @@ CHIP = {
     "sand": ("#f1e6d8", "#c7ae8f"),
 }
 
-_Axis = Sequence[float] | np.ndarray
-Points = tuple[_Axis, _Axis]  # longitudes, latitudes
-CellCounts = tuple[Sequence[float], Sequence[float], Sequence[int]]  # lon, lat, photos per cell
-CellValues = tuple[np.ndarray, np.ndarray, np.ndarray]  # lon, lat, one value per cell
+Ids = np.ndarray  # H3 cell ids of resolution MAP_RES
+Cells = tuple[Ids, np.ndarray]  # the cells, and one value (or one RGB row) for each
 _MAX_LINEAR_BINS = 12
-_EXTENT = (-180, 180, -60, 84)  # west, east, south, north: the maps leave out Antarctica
 _MAP_SIZE = (16, 8.6)
-_HEXAGON = 2.0  # degrees: the hexagons of the maps
+_MAP_DPI = 400  # a cell of resolution 4 is a few pixels wide
+_MEAN = f"mean per H3 cell of resolution {MAP_RES}"
+_HALF_TURN, _TURN = 180.0, 360.0  # degrees of longitude
+_LATS = np.linspace(-60, 84, 145)  # the maps leave out Antarctica
+_FRAME = np.column_stack(  # the outline of the map: 180° W from south to north, then 180° E
+    equal_earth(
+        np.repeat([-_HALF_TURN, _HALF_TURN], len(_LATS)), np.concatenate([_LATS, _LATS[::-1]])
+    )
+)
 _CHIP_FONT = 12
 _MIN_FONT = 6  # a chip label does not get smaller than this
 Box = tuple[float, float, float, float]  # x, y, width, height
@@ -194,68 +204,47 @@ def _fit(ax: plt.Axes, text: plt.Text, width: float, height: float) -> None:
         text.set_fontsize(size)
 
 
-def world_map(
-    path: Path, cells: CellCounts, *, cap: int, res: int, land: Points | None = None
-) -> None:
-    """Draw how full the H3 cells are against the cap (mean per 2° hexagon)."""
+def world_map(path: Path, cells: Cells, *, cap: int, res: int, land: Ids | None = None) -> None:
+    """Draw how full the H3 cells are against the cap (mean per map cell)."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _land(ax, land, _HEXAGON)
     bounds = _cap_bounds(cap)
-    lon, lat, count = cells
-    filled = _hexbin(ax, (lon, lat), count, _palette(BLUES, len(bounds) - 1), _norm(bounds))
+    filled = _draw(ax, cells, land)
+    filled.set(cmap=_palette(BLUES, len(bounds) - 1), norm=_norm(bounds))
     labels = [_bin_label(lo, hi) for lo, hi in pairwise(bounds)]
-    label = f"Scored photos per H3 cell (resolution {res}, cap {cap}), mean per 2° hexagon"
+    label = f"Scored photos per H3 cell (resolution {res}, cap {cap}), {_MEAN}"
     _colorbar(fig, ax, filled, bounds, labels, label)
     _world(ax)
-    _save(fig, path)
+    _save(fig, path, _MAP_DPI)
 
 
 def diversity_map(
-    path: Path, cells: CellValues, *, per_cell: int, res: int, land: Points | None = None
+    path: Path, cells: Cells, *, per_cell: int, res: int, land: Ids | None = None
 ) -> None:
-    """Draw the visual diversity of each H3 cell (mean per 2° hexagon), in 10 quantile bins."""
+    """Draw the visual diversity of each H3 cell (mean per map cell), in 10 quantile bins."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _land(ax, land, _HEXAGON)
-    lon, lat, values = cells
-    bounds = _quantile_bounds(np.asarray(values, float), 10)
-    filled = _hexbin(ax, (lon, lat), values, _palette(GREENS, len(bounds) - 1), _norm(bounds))
+    bounds = _quantile_bounds(np.asarray(cells[1], float), 10)
+    filled = _draw(ax, cells, land)
+    filled.set(cmap=_palette(GREENS, len(bounds) - 1), norm=_norm(bounds))
     labels = [f"{lo:.2f}" for lo in bounds[:-1]]
     label = (
         f"Visual diversity per H3 cell (resolution {res}): mean cosine distance between the "
-        f"embeddings of {per_cell} photos, mean per 2° hexagon"
+        f"embeddings of {per_cell} photos, {_MEAN}"
     )
     _colorbar(fig, ax, filled, bounds, labels, label)
     _world(ax)
-    _save(fig, path)
+    _save(fig, path, _MAP_DPI)
 
 
-def look_map(  # noqa: PLR0913 - the points, their colours and how to draw them
-    path: Path,
-    lon: np.ndarray,
-    lat: np.ndarray,
-    rgb: np.ndarray,
-    *,
-    land: Points | None = None,
-    size: float = _HEXAGON,
-    dpi: int = 150,
-) -> None:
-    """Draw the colour of each H3 cell (mean per `size`° hexagon; 2° as in the other maps):
-    similar colours, similar photos. A smaller `size` and a larger `dpi` show more detail."""
+def look_map(path: Path, cells: Cells, *, land: Ids | None = None) -> None:
+    """Draw the colour of each H3 cell (mean per map cell): similar colours, similar photos."""
     fig, ax = plt.subplots(figsize=_MAP_SIZE)
-    _land(ax, land, size)
-    black = ListedColormap(["#000000"])
-    channels = [_hexbin(ax, (lon, lat), rgb[:, c], black, size=size) for c in range(3)]
-    colors = np.stack([np.asarray(c.get_array()) for c in channels], axis=1)
-    for extra in channels[1:]:  # same hexagons: keep one collection, with the RGB colours
-        extra.remove()
-    channels[0].set_array(None)
-    channels[0].set_facecolor(colors)
+    _draw(ax, cells, land)
     ax.text(
         0.5,
         -0.02,
         "What the photos show: the 3 first principal components of the mean embedding of each "
-        "H3 cell (resolution 5)\nas red, green and blue, "
-        f"mean per {size:g}° hexagon (similar colours: similar photos)",
+        f"H3 cell (resolution 5)\nas red, green and blue, {_MEAN} (similar colours: similar "
+        "photos)",
         transform=ax.transAxes,
         ha="center",
         va="top",
@@ -263,7 +252,7 @@ def look_map(  # noqa: PLR0913 - the points, their colours and how to draw them
         color=MUTED,
     )
     _world(ax)
-    _save(fig, path, dpi)
+    _save(fig, path, _MAP_DPI)
 
 
 def _quantile_bounds(values: np.ndarray, bins: int) -> list[float]:
@@ -281,30 +270,56 @@ def _norm(bounds: Sequence[float]) -> BoundaryNorm:
     return BoundaryNorm(bounds, len(bounds) - 1)
 
 
-def _land(ax: plt.Axes, land: Points | None, size: float) -> None:
-    """Draw in light grey, under the values, each hexagon that has a land point."""
-    if land is None:
-        return
-    lon, lat = (np.asarray(a, float) for a in land)
-    ax.hexbin(
-        lon,
-        lat,
-        gridsize=_grid(size),
-        extent=_EXTENT,
-        linewidths=0,
-        mincnt=1,
-        cmap=ListedColormap([LAND_GREY]),
-        zorder=0,
-    )
+def _draw(ax: plt.Axes, cells: Cells, land: Ids | None) -> PolyCollection:
+    """Draw the cells with their values (one number, or one RGB row, each), over the land
+    cells with no value in light grey. Return the cells with values."""
+    ids, values = cells
+    if land is not None:
+        grey, _ = _polygons(np.setdiff1d(land, ids))
+        grey.set(facecolor=LAND_GREY, zorder=0)
+        _add(ax, grey)
+    shapes, owner = _polygons(ids)
+    picked = np.asarray(values, float)[owner]
+    if picked.ndim > 1:  # RGB rows
+        shapes.set_facecolor(picked)
+    else:
+        shapes.set_array(picked)
+    _add(ax, shapes)
+    return shapes
 
 
-def _grid(size: float) -> tuple[int, int]:
-    """Return the hexagons across and down the map extent, for hexagons `size` degrees wide."""
-    return round((_EXTENT[1] - _EXTENT[0]) / size), round((_EXTENT[3] - _EXTENT[2]) / size)
+def _polygons(ids: Ids) -> tuple[PolyCollection, np.ndarray]:
+    """Return the projected outlines of the cells, and the index of the cell of each outline.
+    A cell over the 180° meridian has two outlines, one on each side of the map."""
+    rings, owner = [], []
+    for i, ring in enumerate(outlines(ids)):
+        for side in _sides(ring):
+            rings.append(np.column_stack(equal_earth(side[:, 0], side[:, 1])))
+            owner.append(i)
+    return PolyCollection(rings, edgecolors="face", linewidths=0.2), np.array(owner, int)
+
+
+def _sides(ring: np.ndarray) -> list[np.ndarray]:
+    """Return the outline with continuous longitudes, twice if it goes over 180°: the copy is
+    360° to the other side, and the frame of the map cuts both."""
+    lon = ring[:, 0]
+    step = lon - lon[0]
+    lon = lon - _TURN * (step > _HALF_TURN) + _TURN * (step < -_HALF_TURN)
+    ring = np.column_stack([lon, ring[:, 1]])
+    if lon.min() >= -_HALF_TURN and lon.max() <= _HALF_TURN:
+        return [ring]
+    shift = _TURN if lon.min() < -_HALF_TURN else -_TURN
+    return [ring, ring + np.array([shift, 0.0])]
+
+
+def _add(ax: plt.Axes, shapes: PolyCollection) -> None:
+    ax.add_collection(shapes, autolim=False)
+    shapes.set_clip_path(Polygon(_FRAME, transform=ax.transData))
 
 
 def _world(ax: plt.Axes) -> None:
-    ax.set(xlim=_EXTENT[:2], ylim=_EXTENT[2:], aspect="equal")
+    x, y = _FRAME[:, 0], _FRAME[:, 1]
+    ax.set(xlim=(x.min(), x.max()), ylim=(y.min(), y.max()), aspect="equal")
     ax.axis("off")
 
 
@@ -335,30 +350,6 @@ def _cap_bounds(cap: int) -> list[float]:
 
 def _bin_label(lo: float, hi: float) -> str:
     return f"{lo:.0f}" if hi - lo <= 1 else f"{lo:.0f}-{hi - 1:.0f}"
-
-
-def _hexbin(
-    ax: plt.Axes,
-    points: Points,
-    values: Sequence[float] | np.ndarray,
-    cmap: ListedColormap,
-    norm: BoundaryNorm | None = None,
-    *,
-    size: float = _HEXAGON,
-):
-    """Draw the mean of `values` in each `size`° hexagon that has a point."""
-    return ax.hexbin(
-        np.asarray(points[0], float),
-        np.asarray(points[1], float),
-        C=np.asarray(values, dtype=float),
-        reduce_C_function=np.mean,
-        gridsize=_grid(size),
-        extent=_EXTENT,
-        linewidths=0,
-        mincnt=1,
-        cmap=cmap,
-        norm=norm,
-    )
 
 
 def score_histogram(

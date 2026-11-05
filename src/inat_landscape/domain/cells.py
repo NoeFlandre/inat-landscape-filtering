@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 Ints = NDArray[np.integer]
+MAP_RES = 4  # the maps show H3 cells of resolution 4, each with the mean of its finer cells
 
 
 def cap_first(cells: Ints, keys: Ints, positions: Ints, photo_ids: Ints, cap: int) -> Ints:
@@ -24,6 +25,15 @@ def top_per_cell(cells: Ints, scores: NDArray[np.floating], cap: int) -> NDArray
     keep = np.zeros(len(cells), dtype=bool)
     keep[order[_rank_in_group(cells[order]) < cap]] = True
     return keep
+
+
+def group_mean(groups: Ints, values: NDArray[np.floating]) -> tuple[Ints, NDArray[np.float64]]:
+    """Return the distinct groups (sorted) and the mean of the values (or rows) of each."""
+    found, index = np.unique(groups, return_inverse=True)
+    sums = np.zeros((len(found), *values.shape[1:]))
+    np.add.at(sums, index, values)
+    counts = np.bincount(index)
+    return found, sums / np.expand_dims(counts, tuple(range(1, values.ndim)))
 
 
 def _rank_in_group(sorted_groups: Ints) -> Ints:

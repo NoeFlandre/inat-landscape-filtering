@@ -243,7 +243,7 @@ def test_card_without_the_land_stage_says_nothing_of_the_sea():
     assert "Coasts" not in text
 
 
-def test_card_explains_the_four_maps():
+def test_card_explains_the_three_maps():
     text = render_card(replace(_info(), diversity_per_cell=50, diversity_min_photos=20))
     assert "](assets/map.png)\n\n**Map 1, photos per cell.** For each H3 cell (resolution" in text
     assert (
@@ -255,15 +255,14 @@ def test_card_explains_the_four_maps():
         "colour](assets/look.png)\n\n**Map 3, what the photos show.** For each H3 cell, the mean "
         "SigLIP2 embedding of the same 50 photos, projected on the 3 first principal components "
         "of all the cells, as red, green and blue. Places with similar colours have similar "
-        "photos; a colour has no fixed meaning.\n\n![What the photos of each H3 cell show, in "
-        "detail](assets/look-detail.png)\n\n**Map 4, Map 3 in detail.** The same colours, with "
-        "hexagons of 0.25° in place of 2°: a hexagon gives the mean of a few cells, not of 100 or "
-        "more. Open the image to zoom in.\n" in text
+        "photos; a colour has no fixed meaning.\n" in text
     )
+    assert "look-detail" not in text
     info = _info()
     assert (
         f"For each H3 cell (resolution {info.h3_res}), the count of published photos, at most "
-        f"{info.embed_cap:,}. A hexagon of the map is 2° wide and gives the mean of its cells.\n"
+        f"{info.embed_cap:,}. Each map shows the H3 cells of resolution 4 (about 1,800 km²), each "
+        "with the mean of its cells, on the Equal Earth projection, which keeps the areas.\n"
         in text
     )
 
@@ -278,4 +277,4 @@ def test_the_maps_show_land_with_no_value_in_grey_after_the_land_stage():
     grey = " On each map, light grey is land with no value, and white is sea.\n"
     assert grey not in render_card(replace(_info(), diversity_per_cell=50))
     land = replace(_info(), diversity_per_cell=50, sea_photos=3, sea_cells=1)
-    assert "gives the mean of its cells." + grey in render_card(land)
+    assert "which keeps the areas." + grey in render_card(land)

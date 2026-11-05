@@ -16,13 +16,13 @@ from inat_landscape.adapters.files import (
     read_table,
     write_table,
 )
-from inat_landscape.adapters.geo import cell_centers, children
+from inat_landscape.adapters.geo import parents
 from inat_landscape.adapters.hf_parquet import image_column, with_hf_features
 from inat_landscape.adapters.hub import REPO_ID, Hub
 from inat_landscape.adapters.images import decode, fetch
 from inat_landscape.adapters.inat_dump import SNAPSHOT_URL
 from inat_landscape.domain.card import CardInfo, Subset, breakdown, render_card
-from inat_landscape.domain.cells import top_per_cell
+from inat_landscape.domain.cells import MAP_RES, group_mean, top_per_cell
 from inat_landscape.domain.diversity import to_unit_range
 from inat_landscape.domain.examples import band_label, pick_examples, score_bands
 from inat_landscape.domain.layers import complete_cap
@@ -48,9 +48,7 @@ PART = "part-00000.parquet"
 LAYER_TOLERANCE = 0.002  # share of failed downloads that a complete layer can miss
 EXAMPLES_PER_BAND = 6  # photos in each row of the card mosaic
 STAGING = Path("publish-parts")  # one image part at a time, deleted after its upload
-DIVERSITY_MAPS = ("assets/diversity.png", "assets/look.png", "assets/look-detail.png")
-DETAIL_HEXAGON = 0.25  # degrees: a few H3 cells of resolution 5 per hexagon, not 100 or more
-DETAIL_DPI = 400
+DIVERSITY_MAPS = ("assets/diversity.png", "assets/look.png")
 
 
 @dataclass(frozen=True)
@@ -126,11 +124,11 @@ def run_maps(workdir: Path, hub: Hub) -> list[str]:
         raise StageError(f"no diversity at {workdir}: run `diversity` first")
     root, params = workdir / HUB_DIR, ingest_params(workdir)
     res = params.get("res", DEFAULT_RES)
-    folder, land = root / "assets", _land_points(workdir, res)
+    folder, land = root / "assets", _land_cells(workdir)
     maps = list(DIVERSITY_MAPS)
     published = root / "data" / "all"
     if published.exists():
-        columns = ["h3_cell", "longitude", "latitude"]
+        columns = ["h3_cell"]
         cap = params.get("cap", PublishSpec.cap_per_cell)
         _world_map(folder, read_table(published, columns), cap, res, land)
         maps.insert(0, "assets/map.png")
@@ -289,7 +287,7 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
     params = ingest_params(workdir)
     figures.pipeline(folder / "hero.png", with_images=spec.images, land=(workdir / LAND).exists())
     cap, res = params.get("cap", spec.cap_per_cell), params.get("res", DEFAULT_RES)
-    land = _land_points(workdir, res)
+    land = _land_cells(workdir)
     _world_map(folder, table, cap, res, land)
     _diversity_maps(folder, workdir, res, land)
     figures.score_histogram(
@@ -301,49 +299,40 @@ def _figures(folder: Path, workdir: Path, table: pa.Table, spec: PublishSpec) ->
     )
 
 
-def _world_map(
-    folder: Path, table: pa.Table, cap: int, res: int, land: figures.Points | None
-) -> None:
-    """Draw the count of photos of each cell."""
-    per_cell = table.group_by("h3_cell").aggregate(
-        [("longitude", "mean"), ("latitude", "mean"), ("h3_cell", "count")]
-    )
-    cells = (
-        per_cell["longitude_mean"].to_pylist(),
-        per_cell["latitude_mean"].to_pylist(),
-        per_cell["h3_cell_count"].to_pylist(),
-    )
-    figures.world_map(folder / "map.png", cells, cap=cap, res=res, land=land)
+def _world_map(folder: Path, table: pa.Table, cap: int, res: int, land: np.ndarray | None) -> None:
+    """Draw the count of photos of each cell (photos with no location are not on the map)."""
+    cells, counts = np.unique(pc.drop_null(table["h3_cell"]).to_numpy(), return_counts=True)
+    figures.world_map(folder / "map.png", _on_map(cells, counts), cap=cap, res=res, land=land)
 
 
-def _land_points(workdir: Path, res: int) -> figures.Points | None:
-    """Return the centres of the children of all the land cells (finer than the cells, so
-    that the small hexagons of the detailed map have points), if the land stage ran."""
+def _on_map(cells: np.ndarray, values: np.ndarray) -> figures.Cells:
+    """Return the map cells, each with the mean of the values of its cells."""
+    return group_mean(parents(cells, MAP_RES), np.asarray(values, float))
+
+
+def _land_cells(workdir: Path) -> np.ndarray | None:
+    """Return the map cells that hold land cells, if the land stage ran."""
     if not (workdir / LAND_GRID).exists():
         return None
-    cells = read_table(workdir / LAND_GRID)["h3_cell"].to_numpy()
-    lat, lon = cell_centers(children(cells, res + 1))
-    return lon, lat
+    return np.unique(parents(read_table(workdir / LAND_GRID)["h3_cell"].to_numpy(), MAP_RES))
 
 
-def _diversity_maps(folder: Path, workdir: Path, res: int, land: figures.Points | None) -> None:
-    """Draw the visual diversity and the colour of each cell, if the diversity stage ran.
-    The colour map is drawn twice: with 2° hexagons as the other maps, and in detail."""
+def _diversity_maps(folder: Path, workdir: Path, res: int, land: np.ndarray | None) -> None:
+    """Draw the visual diversity and the colour of each cell, if the diversity stage ran."""
     found = read_diversity(workdir)
     if found is None:
         return
     table, params = found
-    lat, lon = cell_centers(table["h3_cell"].to_numpy())
-    values = table["diversity"].to_numpy()
-    per_cell = params["per_cell"]
+    cells = table["h3_cell"].to_numpy()
     figures.diversity_map(
-        folder / "diversity.png", (lon, lat, values), per_cell=per_cell, res=res, land=land
+        folder / "diversity.png",
+        _on_map(cells, table["diversity"].to_numpy()),
+        per_cell=params["per_cell"],
+        res=res,
+        land=land,
     )
     pcs = np.stack([table[f"pc{i}"].to_numpy() for i in range(1, COMPONENTS + 1)], axis=1)
-    rgb = to_unit_range(pcs)
-    figures.look_map(folder / "look.png", lon, lat, rgb, land=land)
-    detail = folder / "look-detail.png"
-    figures.look_map(detail, lon, lat, rgb, land=land, size=DETAIL_HEXAGON, dpi=DETAIL_DPI)
+    figures.look_map(folder / "look.png", _on_map(cells, to_unit_range(pcs)), land=land)
 
 
 def _examples(path: Path, table: pa.Table, spec: PublishSpec, fetcher: Fetcher) -> None:

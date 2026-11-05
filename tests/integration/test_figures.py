@@ -4,6 +4,9 @@ import numpy as np
 from PIL import Image
 
 from inat_landscape.adapters import figures
+from inat_landscape.adapters.geo import h3_cells
+from inat_landscape.domain.cells import MAP_RES
+from inat_landscape.domain.projection import equal_earth
 
 PNG = b"\x89PNG\r\n\x1a\n"
 
@@ -13,14 +16,21 @@ def test_pipeline_figure(tmp_path):
     assert (tmp_path / "a" / "hero.png").read_bytes()[:8] == PNG
 
 
+def _cells(lat, lon):
+    return h3_cells(np.array(lat, float), np.array(lon, float), MAP_RES)
+
+
+A, B, C = _cells([0.0, 10.0, 30.0], [0.0, 20.0, -40.0])
+
+
 def test_world_map(tmp_path):
-    cells = ([0.0, 20.0], [0.0, 10.0], [3, 10])
+    cells = (np.array([A, B]), np.array([3.0, 10.0]))
     figures.world_map(tmp_path / "map.png", cells, cap=10, res=5)
     assert (tmp_path / "map.png").read_bytes()[:8] == PNG
 
 
 def test_world_map_with_a_large_cap(tmp_path):
-    cells = ([0.0], [0.0], [700])
+    cells = (np.array([A]), np.array([700.0]))
     figures.world_map(tmp_path / "m.png", cells, cap=1000, res=5)
     assert (tmp_path / "m.png").read_bytes()[:8] == PNG
 
@@ -76,19 +86,19 @@ def test_pipeline_figure_without_images(tmp_path):
 
 
 def test_diversity_map(tmp_path):
-    cells = (np.array([0.0, 20.0, -40.0]), np.array([0.0, 10.0, 30.0]), np.array([0.2, 0.5, 0.9]))
+    cells = (np.array([A, B, C]), np.array([0.2, 0.5, 0.9]))
     figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5)
     assert (tmp_path / "d.png").read_bytes()[:8] == PNG
 
 
 def test_look_map(tmp_path):
     rgb = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    figures.look_map(tmp_path / "l.png", np.array([0.0, 100.0]), np.array([0.0, -30.0]), rgb)
+    figures.look_map(tmp_path / "l.png", (np.array([A, C]), rgb))
     assert (tmp_path / "l.png").read_bytes()[:8] == PNG
 
 
 def test_diversity_map_of_one_value(tmp_path):
-    cells = (np.array([0.0]), np.array([0.0]), np.array([0.4]))
+    cells = (np.array([A]), np.array([0.4]))
     figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5)
     assert (tmp_path / "d.png").read_bytes()[:8] == PNG
 
@@ -109,41 +119,67 @@ def test_pipeline_figure_with_the_land_step(tmp_path):
     assert (tmp_path / "hero.png").read_bytes()[:8] == PNG
 
 
-LAND = (np.array([0.0, 10.0, 30.0]), np.array([0.0, 5.0, 40.0]))  # lon, lat of land points
+LAND = np.array([A, B, C])  # land cells
 
 
 def test_maps_draw_the_land_without_value_in_light_grey(tmp_path):
-    cells = (np.array([0.0]), np.array([0.0]), np.array([0.4]))
-    figures.world_map(tmp_path / "m.png", ([0.0], [0.0], [3]), cap=10, res=5, land=LAND)
+    cells = (np.array([A]), np.array([0.4]))
+    counts = (np.array([A]), np.array([3.0]))
+    figures.world_map(tmp_path / "m.png", counts, cap=10, res=5, land=LAND)
     figures.diversity_map(tmp_path / "d.png", cells, per_cell=50, res=5, land=LAND)
-    rgb = np.array([[1.0, 0.0, 0.0]])
-    figures.look_map(tmp_path / "l.png", cells[0], cells[1], rgb, land=LAND)
+    figures.look_map(tmp_path / "l.png", (np.array([A]), np.array([[1.0, 0.0, 0.0]])), land=LAND)
     for name in ("m", "d", "l"):
         assert (tmp_path / f"{name}.png").read_bytes()[:8] == PNG
 
 
-def test_land_is_under_the_values_with_the_same_hexagons():
+def test_land_with_no_value_is_grey_under_the_values():
     fig, ax = figures.plt.subplots()
-    figures._land(ax, LAND, 0.5)
+    shapes = figures._draw(ax, (np.array([A]), np.array([0.4])), LAND)
     grey = ax.collections[0]
-    assert grey.get_zorder() < 1  # under the values
-    assert np.asarray(grey.get_offsets()).shape == (3, 2)
-    grey_rgba = figures.mpl.colors.to_rgba(figures.LAND_GREY)
-    assert np.allclose(grey.get_cmap()(0.5), grey_rgba)  # one colour for every hexagon
-    figures._land(ax, None, 0.5)
-    assert len(ax.collections) == 1
+    assert grey.get_zorder() < shapes.get_zorder()
+    assert len(grey.get_paths()) == 2  # B and C: A has a value
+    assert np.allclose(grey.get_facecolor(), figures.mpl.colors.to_rgba(figures.LAND_GREY))
+    assert np.asarray(shapes.get_array()).tolist() == [0.4]
+    figures._draw(ax, (np.array([A]), np.array([0.4])), None)
+    assert len(ax.collections) == 3
     figures.plt.close(fig)
 
 
-def test_hexagon_size_sets_the_grid():
-    assert figures._grid(2.0) == (180, 72)
-    assert figures._grid(0.25) == (1440, 576)
+def test_cells_are_their_hexagons_on_the_equal_earth_projection():
+    fig, ax = figures.plt.subplots()
+    shapes = figures._draw(ax, (np.array([B]), np.array([[0.0, 0.0, 1.0]])), None)
+    corners = np.asarray(shapes.get_paths()[0].vertices)[:6]
+    x, y = equal_earth([20.0], [10.0])
+    assert np.allclose(corners.mean(axis=0), [x[0], y[0]], atol=0.01)
+    assert np.allclose(shapes.get_facecolor()[0], [0.0, 0.0, 1.0, 1.0])
+    figures.plt.close(fig)
 
 
-def test_detailed_look_map_is_larger(tmp_path):
-    lon, lat = np.array([0.0, 100.0]), np.array([0.0, -30.0])
-    rgb = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    figures.look_map(tmp_path / "a.png", lon, lat, rgb)
-    figures.look_map(tmp_path / "b.png", lon, lat, rgb, size=0.25, dpi=300)
-    with Image.open(tmp_path / "a.png") as a, Image.open(tmp_path / "b.png") as b:
-        assert b.width > 1.9 * a.width
+def test_a_cell_over_the_180th_meridian_is_drawn_on_both_sides():
+    (east,) = _cells([0.0], [180.0])
+    fig, ax = figures.plt.subplots()
+    shapes = figures._draw(ax, (np.array([east, A]), np.array([0.2, 0.7])), None)
+    assert np.asarray(shapes.get_array()).tolist() == [0.2, 0.2, 0.7]
+    sides = [np.asarray(p.vertices)[:, 0].mean() for p in shapes.get_paths()[:2]]
+    assert sorted(np.sign(sides)) == [-1, 1]
+    figures.plt.close(fig)
+
+
+def test_outline_with_continuous_longitudes():
+    ring = np.array([[179.0, 0.0], [-179.0, 1.0], [-179.0, -1.0]])
+    left, right = figures._sides(ring)
+    assert left[:, 0].tolist() == [179.0, 181.0, 181.0]
+    assert right[:, 0].tolist() == [-181.0, -179.0, -179.0]
+    west = np.array([[-179.0, 0.0], [179.0, 1.0]])
+    assert [s[:, 0].tolist() for s in figures._sides(west)] == [[-179.0, -181.0], [181.0, 179.0]]
+    inside = np.array([[10.0, 0.0], [11.0, 1.0]])
+    assert [s.tolist() for s in figures._sides(inside)] == [inside.tolist()]
+
+
+def test_maps_are_detailed_and_end_at_the_frame(tmp_path):
+    figures.look_map(tmp_path / "l.png", (np.array([A]), np.array([[1.0, 0.0, 0.0]])))
+    with Image.open(tmp_path / "l.png") as image:
+        assert image.width > 4000
+    edge = figures.equal_earth([180.0], [0.0])[0][0]
+    assert np.isclose(figures._FRAME[:, 0].max(), edge)
+    assert figures._FRAME[:, 1].min() == figures.equal_earth([0.0], [-60.0])[1][0]

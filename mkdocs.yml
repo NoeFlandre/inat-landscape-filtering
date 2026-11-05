@@ -22,4 +22,5 @@ nav:
       - adr/0013-land-only.md
       - adr/0014-diversity-maps.md
       - adr/0015-state-in-the-dataset.md
+      - adr/0016-map-cells.md
   - Technical debt: tech-debt.md
